@@ -1,0 +1,27 @@
+name: Check the model
+
+# The commercial model lives in JSON so it can be repriced without a deploy.
+# That is the point, and the risk: a one-character edit to an overage rate can
+# make a tier dominated, or make the upgrade the engine recommends dearer than
+# staying put. Nothing about that fails visibly, so this runs on every push.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Typecheck, validate, run the pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Typecheck and validate the pricing and scoring model
+        run: npm run check
+      - name: Run the pipeline end to end
+        run: npm run demo

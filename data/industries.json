@@ -1,0 +1,1089 @@
+{
+  "_readme": "Each module is a scoring model, not a category label. A generic scraper returns everyone in the county; a module ranks them by whether they need the work right now. Signal weights within a module must sum to exactly 1.0 — check.mjs enforces it — so a score is always 0-100 and always comparable across modules.",
+  "_normalisation": "type=numeric normalises linearly across `range` then inverts when direction is 'lower'. type=boolean is 1 or 0. type=band is piecewise, for relationships that are not monotonic — a 5-year-old roof and a 45-year-old roof are both bad roofing leads, for opposite reasons, and a linear model cannot express that.",
+  "modules": [
+    {
+      "slug": "roofing",
+      "name": "Roofing",
+      "icon": "🏠",
+      "summary": "Ranks by roof age against storm history, weighted by whether a claim is realistically payable.",
+      "thesis": "A roofing lead is not a house. It is a roof old enough to fail, that took hail recently enough to claim, owned by somebody who can authorise the work.",
+      "minPlan": "starter",
+      "signals": [
+        {
+          "id": "roofAgeYears",
+          "label": "Roof age",
+          "weight": 0.26,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 8,
+              "score": 0.05,
+              "note": "Under warranty. Not a lead."
+            },
+            {
+              "max": 14,
+              "score": 0.35
+            },
+            {
+              "max": 19,
+              "score": 0.75
+            },
+            {
+              "max": 30,
+              "score": 1.0,
+              "note": "Asphalt's replacement window."
+            },
+            {
+              "max": null,
+              "score": 0.6,
+              "note": "Likely already replaced without a permit, or a neglected rental."
+            }
+          ],
+          "sources": [
+            "county-permits",
+            "county-assessor"
+          ],
+          "derivation": "Most recent roofing permit; falls back to year built when no permit exists."
+        },
+        {
+          "id": "hailEventsLast3y",
+          "label": "Hail events, 3 years",
+          "weight": 0.22,
+          "type": "numeric",
+          "range": [
+            0,
+            6
+          ],
+          "direction": "higher",
+          "sources": [
+            "noaa-storm-events"
+          ],
+          "derivation": "NOAA storm reports of 1in+ hail within 3km of the parcel centroid."
+        },
+        {
+          "id": "windEventsLast3y",
+          "label": "High-wind events, 3 years",
+          "weight": 0.08,
+          "type": "numeric",
+          "range": [
+            0,
+            8
+          ],
+          "direction": "higher",
+          "sources": [
+            "noaa-storm-events"
+          ]
+        },
+        {
+          "id": "roofMaterial",
+          "label": "Roof material",
+          "weight": 0.1,
+          "type": "categorical",
+          "categories": {
+            "asphalt-3tab": 1.0,
+            "asphalt-architectural": 0.8,
+            "wood-shake": 0.7,
+            "unknown": 0.5,
+            "tile": 0.3,
+            "metal": 0.15
+          },
+          "sources": [
+            "county-assessor",
+            "aerial-imagery"
+          ]
+        },
+        {
+          "id": "propertyValue",
+          "label": "Property value",
+          "weight": 0.1,
+          "type": "band",
+          "unit": "USD",
+          "bands": [
+            {
+              "max": 100000,
+              "score": 0.3,
+              "note": "Deferred maintenance risk — wants it, often cannot fund it."
+            },
+            {
+              "max": 250000,
+              "score": 0.8
+            },
+            {
+              "max": 600000,
+              "score": 1.0
+            },
+            {
+              "max": null,
+              "score": 0.7,
+              "note": "Tends to go to specialty and architectural roofers."
+            }
+          ],
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "ownerOccupied",
+          "label": "Owner-occupied",
+          "weight": 0.12,
+          "type": "boolean",
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ],
+          "derivation": "Mailing address matches situs address. The single strongest predictor of who can say yes on a doorstep."
+        },
+        {
+          "id": "insuranceClaimLikelihood",
+          "label": "Claim likelihood",
+          "weight": 0.12,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "hail severity x roof age x material vulnerability. Marketing suitability only — never an insurance eligibility determination.",
+          "sources": [
+            "noaa-storm-events",
+            "county-permits"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "minRoofAge",
+        "minHailEvents",
+        "ownerOccupiedOnly",
+        "valueRange",
+        "roofMaterial"
+      ],
+      "outreachAngle": "Reference the storm date, not the roof. 'The 14 May hail ran right through your street' outperforms 'your roof looks old' by a wide margin, because one is a fact they remember and the other is an insult."
+    },
+    {
+      "slug": "solar",
+      "name": "Solar",
+      "icon": "🌞",
+      "summary": "Ranks by generation potential against payback period, not by who owns a house.",
+      "thesis": "Solar sells on payback maths. A perfect south-facing roof in a cheap-power state is a worse lead than a mediocre roof where power costs 28c.",
+      "minPlan": "pro",
+      "signals": [
+        {
+          "id": "roofAzimuth",
+          "label": "Roof orientation",
+          "weight": 0.2,
+          "type": "numeric",
+          "unit": "degrees from true south",
+          "range": [
+            0,
+            90
+          ],
+          "direction": "lower",
+          "sources": [
+            "aerial-imagery",
+            "openstreetmap"
+          ]
+        },
+        {
+          "id": "shadeIndex",
+          "label": "Shading",
+          "weight": 0.16,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "lower",
+          "sources": [
+            "aerial-imagery"
+          ],
+          "derivation": "Canopy and structure occlusion over the usable roof plane, annualised."
+        },
+        {
+          "id": "roofUsableSqft",
+          "label": "Usable roof area",
+          "weight": 0.14,
+          "type": "numeric",
+          "unit": "sqft",
+          "range": [
+            200,
+            1600
+          ],
+          "direction": "higher",
+          "sources": [
+            "aerial-imagery",
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "utilityRateCentsKwh",
+          "label": "Local electricity rate",
+          "weight": 0.16,
+          "type": "numeric",
+          "unit": "cents/kWh",
+          "range": [
+            8,
+            32
+          ],
+          "direction": "higher",
+          "sources": [
+            "eia-utility-rates"
+          ],
+          "derivation": "The signal most installers ignore and the one that actually closes deals."
+        },
+        {
+          "id": "estimatedIncomeBracket",
+          "label": "Income bracket",
+          "weight": 0.12,
+          "type": "numeric",
+          "range": [
+            1,
+            8
+          ],
+          "direction": "higher",
+          "restricted": true,
+          "sources": [
+            "census-acs"
+          ],
+          "derivation": "Census block-group median, never an individual estimate. Modelled area data, so it cannot be used for any eligibility decision."
+        },
+        {
+          "id": "ownerOccupied",
+          "label": "Owner-occupied",
+          "weight": 0.12,
+          "type": "boolean",
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "roofAgeYears",
+          "label": "Roof age",
+          "weight": 0.1,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 10,
+              "score": 1.0,
+              "note": "Panels outlive the roof — a new roof is the ideal substrate."
+            },
+            {
+              "max": 18,
+              "score": 0.6
+            },
+            {
+              "max": null,
+              "score": 0.2,
+              "note": "Needs a re-roof first. Sell the roofer a referral instead."
+            }
+          ],
+          "sources": [
+            "county-permits"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "minRoofSqft",
+        "maxShade",
+        "minUtilityRate",
+        "ownerOccupiedOnly"
+      ],
+      "outreachAngle": "Lead with the bill, not the panels. An estimated monthly saving figure beats every environmental pitch ever written."
+    },
+    {
+      "slug": "lawn-landscape",
+      "name": "Lawn & Landscape",
+      "icon": "🌿",
+      "summary": "Ranks by lot size and visible turf condition against ability to pay for recurring service.",
+      "thesis": "Recurring revenue lives on big lots owned by people who are time-poor, not money-poor. Route density beats lead count — twenty jobs on one street is worth more than sixty scattered across a county.",
+      "minPlan": "starter",
+      "signals": [
+        {
+          "id": "lotSizeSqft",
+          "label": "Lot size",
+          "weight": 0.24,
+          "type": "band",
+          "unit": "sqft",
+          "bands": [
+            {
+              "max": 4000,
+              "score": 0.2,
+              "note": "Mows it themselves in twenty minutes."
+            },
+            {
+              "max": 10000,
+              "score": 0.7
+            },
+            {
+              "max": 43560,
+              "score": 1.0,
+              "note": "Quarter acre to an acre — the recurring-contract sweet spot."
+            },
+            {
+              "max": null,
+              "score": 0.55,
+              "note": "Acreage. Different equipment, different quote."
+            }
+          ],
+          "sources": [
+            "county-assessor",
+            "openstreetmap"
+          ]
+        },
+        {
+          "id": "turfConditionIndex",
+          "label": "Turf condition",
+          "weight": 0.18,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "lower",
+          "sources": [
+            "aerial-imagery"
+          ],
+          "derivation": "Vegetation index over the parcel's lawn polygon versus the block median. Below-block-median greenness during growing season means neglect, and neglect means an unserviced lot."
+        },
+        {
+          "id": "propertyValue",
+          "label": "Property value",
+          "weight": 0.16,
+          "type": "numeric",
+          "unit": "USD",
+          "range": [
+            90000,
+            700000
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "hoaLikelihood",
+          "label": "HOA likelihood",
+          "weight": 0.14,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor",
+            "sos-business-filings"
+          ],
+          "derivation": "Subdivision plat age and uniformity plus a registered HOA entity at the same plat. HOAs enforce standards, and enforcement is what converts a maybe into a contract."
+        },
+        {
+          "id": "ownerOccupied",
+          "label": "Owner-occupied",
+          "weight": 0.1,
+          "type": "boolean",
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "seasonalityIndex",
+          "label": "Season timing",
+          "weight": 0.1,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "Local growing-degree-day accumulation against the contract-signing window. Ranks the same list differently in March than in September, which is the entire point.",
+          "sources": [
+            "noaa-climate-normals"
+          ]
+        },
+        {
+          "id": "competitorDensity",
+          "label": "Competitor density",
+          "weight": 0.08,
+          "type": "numeric",
+          "range": [
+            0,
+            25
+          ],
+          "direction": "lower",
+          "sources": [
+            "google-places",
+            "yelp-fusion"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "minLotSize",
+        "hoaOnly",
+        "routeDensity",
+        "ownerOccupiedOnly"
+      ],
+      "outreachAngle": "Sell the route, not the yard. 'We already cut four houses on your street on Thursdays' closes because it is cheap for you and convenient for them."
+    },
+    {
+      "slug": "hvac",
+      "name": "HVAC",
+      "icon": "🧰",
+      "summary": "Ranks by estimated system age against the weather about to hit it.",
+      "thesis": "HVAC is bought in a panic. The whole game is finding the fifteen-year-old system the week before a heat dome, not selling maintenance in October.",
+      "minPlan": "pro",
+      "signals": [
+        {
+          "id": "systemAgeEstimate",
+          "label": "System age",
+          "weight": 0.26,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 8,
+              "score": 0.1
+            },
+            {
+              "max": 12,
+              "score": 0.45
+            },
+            {
+              "max": 18,
+              "score": 1.0,
+              "note": "Failure window for residential split systems."
+            },
+            {
+              "max": null,
+              "score": 0.75,
+              "note": "Running on borrowed time or already swapped off-permit."
+            }
+          ],
+          "sources": [
+            "county-permits",
+            "county-assessor"
+          ],
+          "derivation": "Most recent mechanical permit; falls back to year built."
+        },
+        {
+          "id": "homeAgeYears",
+          "label": "Home age",
+          "weight": 0.22,
+          "type": "numeric",
+          "unit": "years",
+          "range": [
+            0,
+            60
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "emergencyLikelihood",
+          "label": "Emergency likelihood",
+          "weight": 0.16,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "System age x 7-day extreme-temperature forecast. This is the signal that justifies a same-day call rather than a postcard.",
+          "sources": [
+            "noaa-forecast",
+            "county-permits"
+          ]
+        },
+        {
+          "id": "coolingDegreeDays",
+          "label": "Cooling load",
+          "weight": 0.14,
+          "type": "numeric",
+          "range": [
+            500,
+            4000
+          ],
+          "direction": "higher",
+          "sources": [
+            "noaa-climate-normals"
+          ]
+        },
+        {
+          "id": "heatingDegreeDays",
+          "label": "Heating load",
+          "weight": 0.1,
+          "type": "numeric",
+          "range": [
+            200,
+            7000
+          ],
+          "direction": "higher",
+          "sources": [
+            "noaa-climate-normals"
+          ]
+        },
+        {
+          "id": "propertyValue",
+          "label": "Property value",
+          "weight": 0.12,
+          "type": "numeric",
+          "unit": "USD",
+          "range": [
+            80000,
+            650000
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "minSystemAge",
+        "emergencyOnly",
+        "valueRange"
+      ],
+      "outreachAngle": "Time it to the forecast. A replacement offer that lands 72 hours before a heat wave converts several times better than the identical offer in mild weather."
+    },
+    {
+      "slug": "commercial",
+      "name": "Commercial Property",
+      "icon": "🏢",
+      "summary": "Ranks by roof type and maintenance cycle, and tells you whether the occupant can even sign.",
+      "thesis": "Commercial fails on the wrong contact, not the wrong building. Tenant versus owner is worth more than every physical signal combined.",
+      "minPlan": "pro",
+      "signals": [
+        {
+          "id": "ownerVsTenant",
+          "label": "Decision authority",
+          "weight": 0.18,
+          "type": "categorical",
+          "categories": {
+            "owner-occupier": 1.0,
+            "owner-absentee": 0.75,
+            "tenant-nnn": 0.55,
+            "tenant-gross": 0.15,
+            "unknown": 0.4
+          },
+          "sources": [
+            "county-assessor",
+            "sos-business-filings"
+          ],
+          "derivation": "Assessor owner name matched against the registered entity trading at the address. A triple-net tenant pays for the roof; a gross-lease tenant cannot authorise a nail."
+        },
+        {
+          "id": "flatRoofDetected",
+          "label": "Flat roof",
+          "weight": 0.18,
+          "type": "boolean",
+          "direction": "higher",
+          "sources": [
+            "aerial-imagery"
+          ]
+        },
+        {
+          "id": "yearsSinceLastPermit",
+          "label": "Years since last permit",
+          "weight": 0.18,
+          "type": "numeric",
+          "unit": "years",
+          "range": [
+            0,
+            25
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-permits"
+          ]
+        },
+        {
+          "id": "buildingType",
+          "label": "Building type",
+          "weight": 0.16,
+          "type": "categorical",
+          "categories": {
+            "warehouse": 1.0,
+            "retail-strip": 0.9,
+            "light-industrial": 0.85,
+            "office": 0.7,
+            "restaurant": 0.6,
+            "multifamily": 0.5,
+            "unknown": 0.4
+          },
+          "sources": [
+            "county-assessor",
+            "openstreetmap"
+          ]
+        },
+        {
+          "id": "buildingSqft",
+          "label": "Building size",
+          "weight": 0.16,
+          "type": "numeric",
+          "unit": "sqft",
+          "range": [
+            2000,
+            120000
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor",
+            "openstreetmap"
+          ]
+        },
+        {
+          "id": "maintenanceCycleDue",
+          "label": "Maintenance cycle due",
+          "weight": 0.14,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "Time since last permit against the typical service interval for that building type and roof system.",
+          "sources": [
+            "county-permits"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "buildingType",
+        "minSqft",
+        "flatRoofOnly",
+        "ownerOccupiedOnly"
+      ],
+      "outreachAngle": "Get to the entity, not the storefront. Match the assessor's owner name to the Secretary of State filing and you have a registered agent who answers letters."
+    },
+    {
+      "slug": "auto-repair",
+      "name": "Auto Repair",
+      "icon": "🚗",
+      "summary": "Ranks blocks, not driveways — where the out-of-warranty cars are.",
+      "thesis": "You cannot see somebody's car from a data feed and you should not try. This module works at block-group level and targets neighbourhoods whose fleet has aged out of warranty.",
+      "minPlan": "pro",
+      "geographyLevel": "block-group",
+      "signals": [
+        {
+          "id": "vehicleAgeCluster",
+          "label": "Fleet age",
+          "weight": 0.28,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 3,
+              "score": 0.1,
+              "note": "Dealer warranty. Not yours yet."
+            },
+            {
+              "max": 7,
+              "score": 0.65
+            },
+            {
+              "max": 14,
+              "score": 1.0,
+              "note": "Out of warranty, still worth repairing."
+            },
+            {
+              "max": null,
+              "score": 0.5,
+              "note": "Repair cost starts exceeding value."
+            }
+          ],
+          "sources": [
+            "census-acs",
+            "state-registration-aggregates"
+          ]
+        },
+        {
+          "id": "repeatServiceProbability",
+          "label": "Repeat service likelihood",
+          "weight": 0.18,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "Residential tenure and fleet age. Long-tenure households produce repeat customers; transient ones do not.",
+          "sources": [
+            "census-acs"
+          ]
+        },
+        {
+          "id": "householdVehicleCount",
+          "label": "Vehicles per household",
+          "weight": 0.16,
+          "type": "numeric",
+          "range": [
+            0.5,
+            3.5
+          ],
+          "direction": "higher",
+          "sources": [
+            "census-acs"
+          ]
+        },
+        {
+          "id": "medianIncomeBracket",
+          "label": "Income bracket",
+          "weight": 0.14,
+          "type": "band",
+          "unit": "bracket",
+          "restricted": true,
+          "bands": [
+            {
+              "max": 2,
+              "score": 0.45,
+              "note": "Defers repairs."
+            },
+            {
+              "max": 5,
+              "score": 1.0,
+              "note": "Repairs rather than replaces. The core independent-shop customer."
+            },
+            {
+              "max": null,
+              "score": 0.5,
+              "note": "Leases new, services at the dealer."
+            }
+          ],
+          "sources": [
+            "census-acs"
+          ],
+          "derivation": "Census block-group median, never an individual estimate. Marketing suitability only — an area figure used to decide who gets credit or a policy makes the output a consumer report."
+        },
+        {
+          "id": "commuteMilesEstimate",
+          "label": "Commute distance",
+          "weight": 0.12,
+          "type": "numeric",
+          "unit": "miles",
+          "range": [
+            2,
+            40
+          ],
+          "direction": "higher",
+          "sources": [
+            "census-acs"
+          ],
+          "derivation": "Miles cause wear. Long-commute block groups generate service intervals twice as often."
+        },
+        {
+          "id": "competitorDensity",
+          "label": "Competitor density",
+          "weight": 0.12,
+          "type": "numeric",
+          "range": [
+            0,
+            30
+          ],
+          "direction": "lower",
+          "sources": [
+            "google-places",
+            "yelp-fusion"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "minFleetAge",
+        "maxCompetitorDensity"
+      ],
+      "outreachAngle": "Geographic, not personal. Direct mail and geofenced ads to a scored block group — anything that implies you know what car sits in their driveway reads as surveillance and backfires."
+    },
+    {
+      "slug": "general-contractor",
+      "name": "General Contractor",
+      "icon": "🛠",
+      "summary": "Ranks by permit activity and owner equity — who is already spending, and who can borrow against the house.",
+      "thesis": "Renovation is funded from equity. A permit pulled six months ago says a homeowner is mid-project and has a budget open right now.",
+      "minPlan": "pro",
+      "signals": [
+        {
+          "id": "permitActivityLast12m",
+          "label": "Recent permits",
+          "weight": 0.24,
+          "type": "numeric",
+          "range": [
+            0,
+            4
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-permits"
+          ],
+          "derivation": "An open or recent permit is the single highest-intent public signal available anywhere. Nothing else comes close."
+        },
+        {
+          "id": "ownerEquityEstimate",
+          "label": "Owner equity",
+          "weight": 0.2,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "restricted": true,
+          "derived": true,
+          "derivation": "Assessed value against recorded deed and lien amounts, decayed on a standard amortisation curve. Public-record modelling for marketing suitability — it is not a credit report and must never be used to decide who gets financing.",
+          "sources": [
+            "county-assessor",
+            "county-deeds"
+          ]
+        },
+        {
+          "id": "propertyAgeYears",
+          "label": "Property age",
+          "weight": 0.18,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 12,
+              "score": 0.15
+            },
+            {
+              "max": 25,
+              "score": 0.6,
+              "note": "First major refresh — kitchens and baths."
+            },
+            {
+              "max": 60,
+              "score": 1.0,
+              "note": "Systems, envelope and layout all due."
+            },
+            {
+              "max": null,
+              "score": 0.75,
+              "note": "Historic. Higher value, more permitting friction."
+            }
+          ],
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "renovationLikelihood",
+          "label": "Renovation likelihood",
+          "weight": 0.18,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "Recent sale plus property age plus neighbourhood permit rate. Houses renovate within eighteen months of changing hands far more often than at any other time.",
+          "sources": [
+            "county-deeds",
+            "county-permits"
+          ]
+        },
+        {
+          "id": "tenureYears",
+          "label": "Ownership tenure",
+          "weight": 0.1,
+          "type": "band",
+          "unit": "years",
+          "bands": [
+            {
+              "max": 2,
+              "score": 1.0,
+              "note": "Just moved in. Everything is getting changed."
+            },
+            {
+              "max": 8,
+              "score": 0.5
+            },
+            {
+              "max": 20,
+              "score": 0.8,
+              "note": "Settled, equity built, systems failing."
+            },
+            {
+              "max": null,
+              "score": 0.4
+            }
+          ],
+          "sources": [
+            "county-deeds"
+          ]
+        },
+        {
+          "id": "propertyValue",
+          "label": "Property value",
+          "weight": 0.1,
+          "type": "numeric",
+          "unit": "USD",
+          "range": [
+            100000,
+            800000
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "permitType",
+        "minPropertyAge",
+        "recentSaleOnly",
+        "valueRange"
+      ],
+      "outreachAngle": "Permit records are public and timestamped. Reaching a homeowner the week their permit is issued puts you ahead of every contractor still knocking doors cold."
+    },
+    {
+      "slug": "insurance",
+      "name": "Insurance",
+      "icon": "🛡",
+      "summary": "Ranks by life events that force a policy decision — a move, a purchase, a new business.",
+      "thesis": "Nobody shops insurance because they were asked. They shop it because something changed. Find the change.",
+      "minPlan": "elite",
+      "regulated": true,
+      "regulatoryNote": "Every signal here is marketing-suitability only. None may be used to decide eligibility, rate, or terms — that use makes the output a consumer report under the FCRA and this platform is not a consumer reporting agency. The scoring engine refuses to expose signals flagged `restricted` until the account records an attestation; see compliance.ts.",
+      "signals": [
+        {
+          "id": "lifeEventSignal",
+          "label": "Life event",
+          "weight": 0.2,
+          "type": "categorical",
+          "categories": {
+            "new-business-filing": 1.0,
+            "property-purchase": 0.95,
+            "new-construction": 0.8,
+            "address-change": 0.7,
+            "vehicle-titling": 0.65,
+            "none": 0.1,
+            "unknown": 0.2
+          },
+          "sources": [
+            "sos-business-filings",
+            "county-deeds"
+          ],
+          "derivation": "Public filings only. A new LLC needs general liability within about thirty days of formation, and almost nobody calls them."
+        },
+        {
+          "id": "newHomePurchase",
+          "label": "Recent home purchase",
+          "weight": 0.18,
+          "type": "boolean",
+          "direction": "higher",
+          "sources": [
+            "county-deeds"
+          ],
+          "derivation": "Deed recorded in the last 90 days. Homeowner's policy is mandatory at closing and shopped hard in the window right after."
+        },
+        {
+          "id": "currentCarrierChurnRisk",
+          "label": "Carrier churn risk",
+          "weight": 0.16,
+          "type": "numeric",
+          "range": [
+            0,
+            1
+          ],
+          "direction": "higher",
+          "derived": true,
+          "derivation": "Carrier rate-filing increases in the state and ZIP against typical renewal timing. When a carrier files a 14% increase, that book shops in the following quarter.",
+          "sources": [
+            "state-rate-filings"
+          ]
+        },
+        {
+          "id": "propertyValue",
+          "label": "Property value",
+          "weight": 0.12,
+          "type": "numeric",
+          "unit": "USD",
+          "range": [
+            90000,
+            900000
+          ],
+          "direction": "higher",
+          "sources": [
+            "county-assessor"
+          ]
+        },
+        {
+          "id": "vehicleCount",
+          "label": "Vehicles in household",
+          "weight": 0.12,
+          "type": "numeric",
+          "range": [
+            0.5,
+            4
+          ],
+          "direction": "higher",
+          "sources": [
+            "census-acs"
+          ],
+          "derivation": "Block-group aggregate. Multi-vehicle households are where bundling actually pays."
+        },
+        {
+          "id": "estimatedIncomeBracket",
+          "label": "Income bracket",
+          "weight": 0.12,
+          "type": "numeric",
+          "range": [
+            1,
+            8
+          ],
+          "direction": "higher",
+          "restricted": true,
+          "sources": [
+            "census-acs"
+          ]
+        },
+        {
+          "id": "householdSize",
+          "label": "Household size",
+          "weight": 0.1,
+          "type": "numeric",
+          "range": [
+            1,
+            5
+          ],
+          "direction": "higher",
+          "sources": [
+            "census-acs"
+          ]
+        }
+      ],
+      "filters": [
+        "zip",
+        "radiusMiles",
+        "lifeEventType",
+        "recentPurchaseOnly",
+        "valueRange"
+      ],
+      "outreachAngle": "Speed decides it. A new-LLC filing is worth calling the same week; at ninety days somebody else has already written the policy."
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "capabilities": [
+    {
+      "id": "discovery",
+      "name": "Multi-source discovery engine",
+      "minPlan": "starter",
+      "summary": "Pulls candidate records from every source the plan unlocks and deduplicates them into one row per real-world entity.",
+      "delivers": [
+        "Business discovery across Places, Yelp, OSM and state filings",
+        "Property discovery across assessor, permit and deed records",
+        "Per-source rate limiting and backoff",
+        "Retention ceilings enforced per source contract"
+      ]
+    },
+    {
+      "id": "identity",
+      "name": "Identity resolution + spiderweb expansion",
+      "minPlan": "pro",
+      "summary": "Matches the same operator across sources, then walks outward through shared identifiers to find the records nobody searched for.",
+      "delivers": [
+        "Deterministic matching on phone, email and standardised address",
+        "Probabilistic matching with a scored review queue",
+        "Owner-to-entity resolution via Secretary of State filings",
+        "Hop-limited expansion with confidence decay and full provenance"
+      ],
+      "planDepth": { "starter": 0, "pro": 1, "elite": 2, "enterprise": 3 }
+    },
+    {
+      "id": "enrichment",
+      "name": "Lead enrichment",
+      "minPlan": "pro",
+      "summary": "Fills in what discovery does not carry: property detail, owner name, verified business contact.",
+      "delivers": [
+        "USPS-standardised addresses with delivery-point validation",
+        "Property detail — year built, value, lot and building area, land use",
+        "Owner name and mailing address from assessor records",
+        "Business email discovery with MX and SMTP verification",
+        "Phone append with line-type classification"
+      ]
+    },
+    {
+      "id": "scoring",
+      "name": "Explainable lead scoring",
+      "minPlan": "starter",
+      "summary": "A 0-100 score per lead with the contribution of every signal shown, so a rep can see why before they dial.",
+      "delivers": [
+        "Per-industry weighted models",
+        "Signal-level contribution breakdown",
+        "Confidence rating from source coverage",
+        "Score decay as data ages",
+        "Basic model on Starter, full signal set from Pro up"
+      ]
+    },
+    {
+      "id": "outreach",
+      "name": "AI outreach generator",
+      "minPlan": "elite",
+      "summary": "Writes the first touch and the follow-ups from the same signals that produced the score.",
+      "delivers": [
+        "Cold email, SMS and voicemail scripts",
+        "Multi-step follow-up sequences with timing",
+        "Signal-grounded personalisation — the actual storm date, the actual permit",
+        "Compliance footers injected, not optional"
+      ]
+    },
+    {
+      "id": "delivery",
+      "name": "Lead delivery",
+      "minPlan": "starter",
+      "summary": "Gets leads where the customer already works instead of asking them to log in.",
+      "delivers": [
+        "Dashboard with saved searches",
+        "CSV export (every plan, no gate)",
+        "Daily email drop",
+        "REST API and webhooks (Elite and up)",
+        "CRM push (Pro and up)"
+      ]
+    },
+    {
+      "id": "modules",
+      "name": "Industry module engine",
+      "minPlan": "starter",
+      "summary": "Each industry is a data-defined model — signals, weights, filters and outreach angle — so a new vertical ships without a deploy.",
+      "delivers": [
+        "Eight modules at launch",
+        "Per-module filter sets",
+        "Custom modules on Enterprise",
+        "Weights tunable per account from closed-won feedback"
+      ]
+    },
+    {
+      "id": "customisation",
+      "name": "Ideal customer profile",
+      "minPlan": "starter",
+      "summary": "The account tells the engine what a good job looks like, and the ranking follows.",
+      "delivers": [
+        "Service area by radius, ZIP list or drawn polygon",
+        "Ideal customer profile with target value range",
+        "Lead volume pacing so a month's quota is not spent in a day",
+        "Per-account signal weight overrides (Elite and up)"
+      ]
+    },
+    {
+      "id": "billing",
+      "name": "Billing and upsell",
+      "minPlan": "starter",
+      "summary": "Stripe subscriptions with metered overage, lead packs and industry unlocks.",
+      "delivers": [
+        "Stripe subscriptions and metered usage",
+        "Lead packs with a best-price guarantee",
+        "Industry unlocks as subscription add-ons",
+        "Upgrade recommendation when the current plan genuinely costs more",
+        "Dunning and involuntary-churn recovery"
+      ]
+    },
+    {
+      "id": "compliance",
+      "name": "Compliance layer",
+      "minPlan": "starter",
+      "summary": "Scrubbing and gating that runs whether or not the customer remembers it exists.",
+      "delivers": [
+        "DNC scrub before release, re-scrubbed every 31 days",
+        "Known-litigator suppression",
+        "Account-level opt-out honoured across all channels",
+        "CAN-SPAM footer enforcement on generated email",
+        "Restricted signals gated behind an FCRA attestation",
+        "Full provenance on every field for audit"
+      ]
+    }
+  ],
+
+  "integrations": [
+    { "id": "jobber", "name": "Jobber", "type": "crm", "direction": "push", "minPlan": "pro" },
+    { "id": "servicetitan", "name": "ServiceTitan", "type": "crm", "direction": "push", "minPlan": "pro" },
+    { "id": "gohighlevel", "name": "GoHighLevel", "type": "crm", "direction": "push", "minPlan": "pro" },
+    { "id": "housecall-pro", "name": "Housecall Pro", "type": "crm", "direction": "push", "minPlan": "pro" },
+    { "id": "hubspot", "name": "HubSpot", "type": "crm", "direction": "push", "minPlan": "pro" },
+    { "id": "csv", "name": "CSV export", "type": "file", "direction": "export", "minPlan": "starter" },
+    { "id": "email-drop", "name": "Daily email drop", "type": "notification", "direction": "export", "minPlan": "starter" },
+    { "id": "webhook", "name": "Webhooks", "type": "api", "direction": "push", "minPlan": "elite" },
+    { "id": "rest-api", "name": "REST API", "type": "api", "direction": "pull", "minPlan": "elite" },
+    { "id": "zapier", "name": "Zapier", "type": "automation", "direction": "push", "minPlan": "elite" },
+    { "id": "custom", "name": "Custom integration", "type": "api", "direction": "both", "minPlan": "enterprise" }
+  ],
+
+  "compliance": {
+    "dncScrubMaxAgeDays": 31,
+    "dncScrubNote": "31 days is the TCPA safe-harbour interval. A number scrubbed longer ago than that is treated as unscrubbed and withheld from release.",
+    "canSpamRequiredFields": ["senderPostalAddress", "unsubscribeUrl", "senderName"],
+    "canSpamNote": "A generated email missing any of these does not send. The template renderer rejects it rather than filling in a placeholder, because a placeholder that ships is a $53,088-per-message violation.",
+    "quietHours": { "startHour": 21, "endHour": 8, "basis": "recipient local time", "channels": ["call", "sms"] },
+    "smsRequiresPriorConsent": true,
+    "smsNote": "Cold SMS to a mobile number without prior express written consent is not a grey area — it is the single most litigated part of the TCPA. The platform generates SMS copy only for contacts carrying a recorded consent record.",
+    "fcraBoundary": {
+      "isConsumerReportingAgency": false,
+      "restrictedSignalsRequireAttestation": true,
+      "prohibitedUses": ["credit eligibility", "insurance underwriting or rating", "employment screening", "tenant screening"],
+      "note": "Signals flagged `restricted` are modelled from public and aggregate data for marketing suitability. Using them to decide who gets a policy, a loan, a job or a lease turns the output into a consumer report and the seller into a CRA. The engine withholds those signals until the account attests, and the attestation is recorded with a timestamp."
+    },
+    "aggregateDisclosure": "Any field derived from Census block-group data describes a neighbourhood, not a person, and is labelled as an area estimate everywhere it appears.",
+    "dataSubjectRights": {
+      "deleteOnRequest": true,
+      "maxResponseDays": 45,
+      "note": "CCPA/CPRA and the newer state acts give residents deletion and opt-out rights over exactly this kind of data. Building the delete path on day one costs a week; retrofitting it under a regulator's deadline costs a quarter."
+    }
+  },
+
+  "outreachTemplates": [
+    {
+      "id": "roofing-storm-email",
+      "industry": "roofing",
+      "channel": "email",
+      "subject": "Storm damage check on {{lead.street}}?",
+      "body": "Hi {{lead.ownerFirstName}},\n\nNOAA recorded {{signal.hailMaxInches}}\" hail within a few blocks of {{lead.street}} on {{signal.lastHailDate}}. Roofs around {{lead.roofAgeYears}} years old often take damage in that range without anything showing from the ground.\n\nWe're inspecting in {{lead.city}} this week. No charge, and no obligation to file anything — you'd get photos either way.\n\nWorth fifteen minutes?\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["signal.hailMaxInches", "signal.lastHailDate", "lead.roofAgeYears"]
+    },
+    {
+      "id": "lawn-route-email",
+      "industry": "lawn-landscape",
+      "channel": "email",
+      "subject": "We're already on {{lead.street}} on {{business.routeDay}}s",
+      "body": "Hi {{lead.ownerFirstName}},\n\nWe service {{business.routeCount}} properties on {{lead.street}} every {{business.routeDay}}. Adding your {{lead.lotSizeLabel}} lot to that run costs us almost nothing in drive time, so I can hold {{business.routePrice}} for the season.\n\nSame crew, same day, every week. Cancel whenever.\n\nWant me to put you on the list?\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["lead.street", "lead.lotSizeLabel"]
+    },
+    {
+      "id": "hvac-preseason-email",
+      "industry": "hvac",
+      "channel": "email",
+      "subject": "{{signal.extremeTempDays7d}} days above {{signal.tempThreshold}}° coming",
+      "body": "Hi {{lead.ownerFirstName}},\n\nThe forecast has {{signal.extremeTempDays7d}} days above {{signal.tempThreshold}}° next week. County records put the system at {{lead.systemAgeEstimate}} years, which is right where compressors give out under sustained load.\n\nWe have service slots open before it hits. After it hits, we won't — that week is wall-to-wall emergencies every year.\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["signal.extremeTempDays7d", "lead.systemAgeEstimate"]
+    },
+    {
+      "id": "solar-payback-email",
+      "industry": "solar",
+      "channel": "email",
+      "subject": "Rough numbers for {{lead.street}}",
+      "body": "Hi {{lead.ownerFirstName}},\n\n{{signal.utilityName}} is at {{signal.utilityRateCentsKwh}}c/kWh in {{lead.city}}. Your roof reads about {{lead.roofUsableSqft}} usable sq ft facing {{lead.roofOrientation}}, which pencils to roughly {{lead.estimatedMonthlySaving}} a month.\n\nThat's a desk estimate off public data, not a quote — but it's close enough to tell you whether it's worth a real look.\n\nWant the full breakdown?\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["signal.utilityRateCentsKwh", "lead.roofUsableSqft"]
+    },
+    {
+      "id": "gc-permit-email",
+      "industry": "general-contractor",
+      "channel": "email",
+      "subject": "Your {{lead.permitType}} permit on {{lead.street}}",
+      "body": "Hi {{lead.ownerFirstName}},\n\nSaw the {{lead.permitType}} permit issued for {{lead.street}} on {{lead.permitIssuedDate}}. We do a lot of that work in {{lead.city}}.\n\nIf you're still lining up trades — or if the scope has grown the way it usually does once walls are open — happy to quote the rest.\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["lead.permitType", "lead.permitIssuedDate"]
+    },
+    {
+      "id": "commercial-owner-letter",
+      "industry": "commercial",
+      "channel": "email",
+      "subject": "Roof condition at {{lead.propertyAddress}}",
+      "body": "{{lead.ownerEntityName}} — attn {{lead.registeredAgent}},\n\nWe inspect flat roofs on {{lead.buildingType}} properties in {{lead.city}}. County records show no roofing permit at {{lead.propertyAddress}} in {{lead.yearsSinceLastPermit}} years, which is past the usual service interval for a {{lead.buildingSqft}} sq ft membrane.\n\nWe can do a condition report and a budget number for next fiscal year at no cost.\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["lead.ownerEntityName", "lead.yearsSinceLastPermit"]
+    },
+    {
+      "id": "insurance-newllc-email",
+      "industry": "insurance",
+      "channel": "email",
+      "subject": "Congrats on {{lead.legalEntityName}}",
+      "body": "Hi {{lead.ownerFirstName}},\n\nSaw {{lead.legalEntityName}} registered with the state on {{lead.formationDate}}. Congratulations.\n\nMost new {{lead.industryLabel}} businesses need general liability in place before their first contract — a lot of clients won't sign without a certificate. It's usually cheaper than people expect at this stage.\n\nHappy to send a quote you can compare against.\n\n{{business.senderName}}\n{{business.name}}\n{{business.phone}}\n\n{{business.senderPostalAddress}}\n{{unsubscribeUrl}}",
+      "requires": ["lead.legalEntityName", "lead.formationDate"]
+    },
+    {
+      "id": "generic-voicemail",
+      "industry": "*",
+      "channel": "voicemail",
+      "body": "Hi {{lead.ownerFirstName}}, this is {{business.senderName}} with {{business.name}} here in {{lead.city}}. Calling about {{lead.hook}} — nothing urgent. If it's useful, I'm on {{business.phone}}. If not, no need to call back and I won't chase you. Thanks.",
+      "requires": ["lead.hook"],
+      "note": "Short, names the reason, and gives an explicit out. Voicemails that do all three get returned several times more often than ones that pitch."
+    }
+  ],
+
+  "followUpSequence": {
+    "default": [
+      { "day": 0, "channel": "email", "intent": "signal-grounded first touch" },
+      { "day": 3, "channel": "call", "intent": "reference the email, ask one question" },
+      { "day": 7, "channel": "email", "intent": "proof — a nearby job, a photo, a number" },
+      { "day": 14, "channel": "voicemail", "intent": "short, explicit out" },
+      { "day": 30, "channel": "email", "intent": "breakup — permission to close the file" }
+    ],
+    "note": "Five touches over thirty days. Most contractors send one and conclude the leads were bad."
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "currency": "USD",
+  "product": {
+    "name": "Marshall0",
+    "descriptor": "AI Lead Finder",
+    "positioning": "Find the properties and businesses that need your service this month — not a list of everyone in the county.",
+    "billingCycleDays": 30
+  },
+  "_note_quota": "quota.leadsPerMonth is the number of NEW resolved leads released to the account in a cycle. Re-viewing a lead already released never re-charges — otherwise a customer who exports twice pays twice for the same row, which is the single fastest way to make a lead product feel like a scam.",
+  "plans": [
+    {
+      "id": "starter",
+      "name": "Starter",
+      "tagline": "For solo operators and small crews.",
+      "audience": "Lawn guys, handymen, cleaners, one-truck roofers.",
+      "monthly": 9,
+      "annual": 90,
+      "order": 1,
+      "quota": {
+        "leadsPerMonth": 50,
+        "industries": 1,
+        "savedSearches": 3,
+        "seats": 1,
+        "serviceAreas": 1
+      },
+      "overagePerLead": 0.25,
+      "scoring": "basic",
+      "spiderwebDepth": 0,
+      "refreshHours": 168,
+      "features": [
+        "50 new leads a month",
+        "1 industry module",
+        "Basic lead scoring",
+        "Location and category filters",
+        "CSV export",
+        "Email notifications"
+      ],
+      "why": "$9 is impulse territory. Nobody schedules a meeting to approve $9 — they just try it. The job of this tier is to get a real lead list in front of somebody in the first ten minutes."
+    },
+    {
+      "id": "pro",
+      "name": "Pro",
+      "tagline": "For growing businesses running a crew.",
+      "audience": "Two to ten trucks, someone answering the phone full time.",
+      "monthly": 29,
+      "annual": 290,
+      "order": 2,
+      "popular": true,
+      "quota": {
+        "leadsPerMonth": 300,
+        "industries": 3,
+        "savedSearches": 15,
+        "seats": 3,
+        "serviceAreas": 5
+      },
+      "overagePerLead": 0.15,
+      "scoring": "advanced",
+      "spiderwebDepth": 1,
+      "refreshHours": 72,
+      "features": [
+        "300 new leads a month",
+        "3 industry modules",
+        "Advanced lead scoring with signal breakdown",
+        "Property data enrichment",
+        "Competitor density analysis",
+        "Multi-location search",
+        "CRM export (Jobber, ServiceTitan, GoHighLevel)"
+      ],
+      "why": "The sweet spot. Most service businesses land here and stay, because 300 scored leads is more than one salesperson can actually work in a month."
+    },
+    {
+      "id": "elite",
+      "name": "Elite",
+      "tagline": "For serious contractors and agencies.",
+      "audience": "Agencies reselling leads, contractors with a dedicated sales seat.",
+      "monthly": 79,
+      "annual": 790,
+      "order": 3,
+      "quota": {
+        "leadsPerMonth": 1000,
+        "industries": null,
+        "savedSearches": 100,
+        "seats": 10,
+        "serviceAreas": 25
+      },
+      "overagePerLead": 0.1,
+      "scoring": "advanced",
+      "spiderwebDepth": 2,
+      "refreshHours": 24,
+      "features": [
+        "1,000 new leads a month",
+        "Every industry module unlocked",
+        "AI outreach scripts (email, SMS, voicemail)",
+        "AI follow-up sequences",
+        "Owner name resolution",
+        "Business email discovery",
+        "Social signal scanning",
+        "Daily auto-lead feed",
+        "API access"
+      ],
+      "why": "Where the margin is. An agency that resells at $15 a lead pays $79 for a thousand — the tier sells itself the moment they do that arithmetic."
+    },
+    {
+      "id": "enterprise",
+      "name": "Enterprise",
+      "tagline": "For franchises and multi-location companies.",
+      "audience": "Roofing groups, solar installers, insurance agencies, franchise networks.",
+      "monthly": 199,
+      "annual": 1990,
+      "order": 4,
+      "quota": {
+        "leadsPerMonth": null,
+        "industries": null,
+        "savedSearches": null,
+        "seats": null,
+        "serviceAreas": null
+      },
+      "fairUsePerMonth": 25000,
+      "overagePerLead": 0,
+      "scoring": "advanced",
+      "spiderwebDepth": 3,
+      "refreshHours": 6,
+      "features": [
+        "Unlimited leads (25,000/mo fair use, then we talk)",
+        "Dedicated scraper nodes — your rate limits, not the shared pool",
+        "Custom industry modules",
+        "Team accounts with territory splitting",
+        "Priority data refresh (6-hourly)",
+        "Custom integrations",
+        "White-label dashboard"
+      ],
+      "why": "Sold, not self-served. 'Unlimited' with a published fair-use number is honest and still closes — the alternative is a surprise invoice, which is how you lose a franchise account permanently."
+    }
+  ],
+  "trial": {
+    "days": 3,
+    "leads": 25,
+    "industries": 1,
+    "cardRequired": true,
+    "why": "3 days is deliberate. A 14-day trial on a $9 product means two weeks of infrastructure cost before you learn anything, and people forget they signed up. 3 days forces them to actually open it. Card up front, because a $9 plan cannot absorb the support load of tyre-kickers, and because trial-to-paid conversion roughly triples with a card on file.",
+    "onExpiry": "downgrade_to_locked",
+    "lockedBehaviour": "Leads already released stay visible and exportable forever. We never hold data hostage — it just stops refreshing."
+  },
+  "payPerLead": {
+    "enabled": true,
+    "why": "A real slice of contractors will never take a subscription. Selling them packs at a higher unit price is free margin, and a pack buyer who comes back three times converts to Pro on their own.",
+    "billing": "flat_rate_by_bracket_with_best_price_guarantee",
+    "brackets": [
+      {
+        "min": 1,
+        "max": 99,
+        "perLead": 0.5
+      },
+      {
+        "min": 100,
+        "max": 499,
+        "perLead": 0.35
+      },
+      {
+        "min": 500,
+        "max": 1999,
+        "perLead": 0.22
+      },
+      {
+        "min": 2000,
+        "max": 9999,
+        "perLead": 0.15
+      },
+      {
+        "min": 10000,
+        "max": null,
+        "perLead": 0.1
+      }
+    ],
+    "bestPriceGuarantee": "A customer is never charged more than the cheapest price that buys at least the quantity they asked for. Without this, 99 leads costs $49.50 and 100 costs $35.00 — a cliff that generates support tickets and looks like a bug, because it is one."
+  },
+  "industryUnlock": {
+    "monthly": 7,
+    "appliesTo": [
+      "starter",
+      "pro"
+    ],
+    "why": "Priced so a second or third industry is a cheap yes rather than a tier decision — that is expansion revenue with no friction. The ceiling is visible: three unlocks on Starter comes to $30, which is more than Pro's $29 for six times the leads. A customer staring at that does the upgrade themselves, which is the only kind that does not churn. Industry count never forces the move on its own; lead volume does, and recommendPlan computes both."
+  },
+  "referral": {
+    "leadsPerReferral": 100,
+    "referrerCapPerMonth": 1000,
+    "refereeBonusLeads": 50,
+    "qualifiesOn": "referee_first_payment",
+    "why": "Paying in leads rather than cash costs marginal compute instead of margin, and the reward is only useful inside the product. Qualifying on first payment, not signup, keeps it from becoming a fake-account farm."
+  },
+  "annual": {
+    "monthsCharged": 10,
+    "label": "2 months free"
+  }
+}

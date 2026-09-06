@@ -1,0 +1,16 @@
+{
+  "name": "marshall0",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Lead Finder — pricing model, industry scoring modules, identity resolution and the compliance layer.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "check": "tsc -p tsconfig.json && node check.mjs",
+    "demo": "tsc -p tsconfig.demo.json && printf '{\"type\":\"commonjs\"}' > .build/package.json && node .build/demo.js",
+    "test": "npm run check && npm run demo"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
