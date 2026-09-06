@@ -1,28 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { sql } from '@vercel/postgres';
 import { entitlements, quotaState } from '@engine';
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
+  const { userId } = await auth();
 
-  // Get current user
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Get account
-  const { data: account, error: accountError } = await supabase
-    .from('accounts')
-    .select('*')
-    .eq('user_id', user.id)
-    .single();
+  let account;
+  try {
+    const result = await sql`
+      SELECT id, user_id, plan_id, free, founding_member
+      FROM accounts
+      WHERE clerk_id = ${userId}
+    `;
+    account = result.rows[0];
+  } catch (error) {
+    console.error('Failed to fetch account:', error);
+    return NextResponse.json({ error: 'Account not found' }, { status: 404 });
+  }
 
-  if (accountError || !account) {
+  if (!account) {
     return NextResponse.json({ error: 'Account not found' }, { status: 404 });
   }
 
@@ -38,14 +40,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Get service area
-    const { data: serviceArea, error: areaError } = await supabase
-      .from('service_areas')
-      .select('*')
-      .eq('id', serviceAreaId)
-      .eq('account_id', account.id)
-      .single();
+    let serviceArea;
+    try {
+      const result = await sql`
+        SELECT id, name, county_fips, state
+        FROM service_areas
+        WHERE id = ${serviceAreaId} AND account_id = ${account.id}
+      `;
+      serviceArea = result.rows[0];
+    } catch (error) {
+      console.error('Failed to fetch service area:', error);
+      return NextResponse.json(
+        { error: 'Service area not found' },
+        { status: 404 }
+      );
+    }
 
-    if (areaError || !serviceArea) {
+    if (!serviceArea) {
       return NextResponse.json(
         { error: 'Service area not found' },
         { status: 404 }
@@ -63,15 +74,21 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    const { data: monthlyLeads } = await supabase
-      .from('leads')
-      .select('id', { count: 'exact' })
-      .eq('account_id', account.id)
-      .gte('created_at', monthStart);
+    let monthlyLeadsCount = 0;
+    try {
+      const result = await sql`
+        SELECT COUNT(*) as count
+        FROM leads
+        WHERE account_id = ${account.id} AND created_at >= ${monthStart}
+      `;
+      monthlyLeadsCount = parseInt(result.rows[0].count as string, 10);
+    } catch (error) {
+      console.error('Failed to fetch monthly leads:', error);
+    }
 
     const quota = quotaState({
       plan_id: account.plan_id,
-      leadsReleased: monthlyLeads?.length || 0,
+      leadsReleased: monthlyLeadsCount,
       free: account.free,
     });
 
@@ -93,47 +110,40 @@ export async function POST(request: NextRequest) {
     // 4. Run roofing pipeline
     // For now, return mock data for demo
 
-    const mockLeads = generateMockLeads(account.id, serviceArea, minScore);
+    const mockLeads = generateMockLeads(account.id as string, serviceArea, minScore);
 
     // Write leads to database
-    const leadsToInsert = mockLeads.map((lead) => ({
-      account_id: account.id,
-      service_area_id: serviceArea.id,
-      industry,
-      parcel_id: lead.parcelId,
-      address: lead.address,
-      city: lead.city,
-      state: lead.state,
-      owner_name: lead.ownerName,
-      signals: lead.signals,
-      contributions: lead.contributions,
-      score: lead.score,
-      storm: lead.storm,
-      roof: lead.roof,
-      owner: lead.owner,
-      release: lead.release,
-      hook: lead.hook,
-      status: 'available',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }));
-
-    const { data: insertedLeads, error: insertError } = await supabase
-      .from('leads')
-      .insert(leadsToInsert)
-      .select();
-
-    if (insertError) {
-      console.error('Failed to insert leads:', insertError);
+    let insertedCount = 0;
+    try {
+      for (const lead of mockLeads) {
+        await sql`
+          INSERT INTO leads (
+            account_id, service_area_id, industry, parcel_id,
+            address, city, state, owner_name,
+            signals, contributions, score, storm, roof, owner, hook,
+            status, created_at, updated_at
+          ) VALUES (
+            ${account.id}, ${serviceArea.id}, ${industry}, ${lead.parcelId},
+            ${lead.address}, ${lead.city}, ${lead.state}, ${lead.ownerName},
+            ${JSON.stringify(lead.signals)}, ${JSON.stringify(lead.contributions)},
+            ${JSON.stringify(lead.score)}, ${JSON.stringify(lead.storm)},
+            ${JSON.stringify(lead.roof)}, ${JSON.stringify(lead.owner)}, ${lead.hook},
+            'available', NOW(), NOW()
+          )
+        `;
+        insertedCount++;
+      }
+    } catch (error) {
+      console.error('Failed to insert leads:', error);
       return NextResponse.json(
-        { error: 'Failed to save leads', details: insertError.message },
+        { error: 'Failed to save leads', details: error instanceof Error ? error.message : 'Unknown error' },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      leads: insertedLeads || mockLeads,
-      count: insertedLeads?.length || mockLeads.length,
+      leads: mockLeads,
+      count: insertedCount,
     });
   } catch (error) {
     console.error('Search error:', error);
