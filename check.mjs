@@ -1,5 +1,5 @@
 /**
- * Invariant check for the Marshall0 lead-finder package.
+ * Invariant check for the Prospect Pro lead-finder package.
  *
  * The commercial model lives in JSON so it can be changed without a deploy.
  * That is the point, and it is also the risk: a one-character edit to an
@@ -326,7 +326,7 @@ if (problems.length) {
 console.log(
   (launch ? `launch: ${launch.mode} (${launch.freeQuota.leadsPerMonth} leads free, ` +
             `~$${launch.estimatedCostPerFreeAccountMonthly}/account/mo burn)\n` : '') +
-  `marshall0 OK — ${plans.length} plans, ${industries.modules.length} industry modules ` +
+  `prospect-pro OK — ${plans.length} plans, ${industries.modules.length} industry modules ` +
   `(${industries.modules.reduce((a, m) => a + m.signals.length, 0)} signals), ` +
   `${sourcesData.sources.length} sources, ${platform.capabilities.length} capabilities, ` +
   `${platform.outreachTemplates.length} templates`

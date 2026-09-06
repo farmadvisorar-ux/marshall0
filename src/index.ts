@@ -1,5 +1,5 @@
 /**
- * Marshall0 — AI Lead Finder.
+ * Prospect Pro — AI Lead Finder.
  *
  * Data files that define the commercial and scoring model, and the engines that
  * read them. No runtime dependencies and no framework, so this drops into an
