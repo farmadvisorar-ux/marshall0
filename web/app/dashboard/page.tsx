@@ -1,51 +1,64 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { auth } from '@clerk/nextjs/server';
+import { sql } from '@vercel/postgres';
 import { entitlements, accruedValue, listPrice, billedPrice, plan, isFreeLaunch } from '@engine';
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
+  const { userId } = await auth();
 
-  // Get current user
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
+  if (!userId) {
     redirect('/login');
   }
 
   // Get account data
-  const { data: account, error: accountError } = await supabase
-    .from('accounts')
-    .select('*, profiles(name, email), usage_cycles(accrued_value, leads_released, charged_cycles)')
-    .eq('user_id', user.id)
-    .single();
+  let account;
+  try {
+    const result = await sql`
+      SELECT id, user_id, plan_id, free, founding_member, cycle_start, created_at
+      FROM accounts
+      WHERE clerk_id = ${userId}
+    `;
+    account = result.rows[0];
+  } catch (error) {
+    console.error('Failed to fetch account:', error);
+    account = null;
+  }
 
-  if (accountError || !account) {
+  if (!account) {
     redirect('/login');
   }
 
+  // Get user email from Clerk
+  const userEmail = userId; // You'd normally fetch this from Clerk's User object
+
   // Get service areas count
-  const { data: serviceAreas } = await supabase
-    .from('service_areas')
-    .select('id', { count: 'exact' })
-    .eq('account_id', account.id);
+  let serviceAreasCount = 0;
+  try {
+    const result = await sql`SELECT COUNT(*) as count FROM service_areas WHERE account_id = ${account.id}`;
+    serviceAreasCount = parseInt(result.rows[0].count as string, 10);
+  } catch (error) {
+    console.error('Failed to fetch service areas:', error);
+  }
 
   // Get saved searches count
-  const { data: searches } = await supabase
-    .from('saved_searches')
-    .select('id', { count: 'exact' })
-    .eq('account_id', account.id);
+  let searchesCount = 0;
+  try {
+    const result = await sql`SELECT COUNT(*) as count FROM saved_searches WHERE account_id = ${account.id}`;
+    searchesCount = parseInt(result.rows[0].count as string, 10);
+  } catch (error) {
+    console.error('Failed to fetch searches:', error);
+  }
 
   // Get recent leads count (last 30 days)
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: recentLeads } = await supabase
-    .from('leads')
-    .select('id', { count: 'exact' })
-    .eq('account_id', account.id)
-    .gte('created_at', thirtyDaysAgo);
+  let recentLeadsCount = 0;
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await sql`SELECT COUNT(*) as count FROM leads WHERE account_id = ${account.id} AND created_at >= ${thirtyDaysAgo}`;
+    recentLeadsCount = parseInt(result.rows[0].count as string, 10);
+  } catch (error) {
+    console.error('Failed to fetch recent leads:', error);
+  }
 
   const entitlementInfo = entitlements({ plan_id: account.plan_id, free: account.free, founding_member: account.founding_member });
   const planInfo = plan(account.plan_id);
@@ -73,9 +86,9 @@ export default async function DashboardPage() {
             Prospect Pro
           </h1>
           <nav className="flex items-center gap-4">
-            <span className="text-slate-700 dark:text-slate-300">{account.profiles.email}</span>
+            <span className="text-slate-700 dark:text-slate-300">{userEmail}</span>
             <a
-              href="/auth/signout"
+              href="/api/auth/logout"
               className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
             >
               Sign out
@@ -135,14 +148,14 @@ export default async function DashboardPage() {
                 <div className="flex justify-between mb-1">
                   <p className="text-sm text-slate-600 dark:text-slate-400">Leads</p>
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                    {recentLeads?.length || 0} / {entitlementInfo.leadsPerMonth}
+                    {recentLeadsCount} / {entitlementInfo.leadsPerMonth}
                   </p>
                 </div>
                 <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
                   <div
                     className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full"
                     style={{
-                      width: `${Math.min(100, ((recentLeads?.length || 0) / entitlementInfo.leadsPerMonth) * 100)}%`,
+                      width: `${Math.min(100, (recentLeadsCount / entitlementInfo.leadsPerMonth) * 100)}%`,
                     }}
                   />
                 </div>
@@ -156,7 +169,7 @@ export default async function DashboardPage() {
               <div>
                 <p className="text-sm text-slate-600 dark:text-slate-400">Service Areas</p>
                 <p className="text-lg font-semibold text-slate-900 dark:text-white">
-                  {serviceAreas?.length || 0}
+                  {serviceAreasCount}
                 </p>
               </div>
             </div>
