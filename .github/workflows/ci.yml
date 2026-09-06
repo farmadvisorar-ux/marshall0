@@ -23,5 +23,8 @@ jobs:
       - run: npm ci
       - name: Typecheck and validate the pricing and scoring model
         run: npm run check
-      - name: Run the pipeline end to end
+      - name: Run the platform pipeline end to end
         run: npm run demo
+
+      - name: Run the roofing vertical end to end
+        run: npm run demo:roofing

@@ -66,12 +66,27 @@ const data = plansData as unknown as {
   industryUnlock: { monthly: number; appliesTo: PlanId[] };
   referral: { leadsPerReferral: number; referrerCapPerMonth: number; refereeBonusLeads: number };
   annual: { monthsCharged: number; label: string };
+  launch: LaunchConfig;
 };
+
+export interface LaunchConfig {
+  mode: 'free-beta' | 'paid';
+  /** Which plan's feature set a free account gets. */
+  grants: PlanId;
+  freeQuota: { leadsPerMonth: number; industries: number; seats: number; serviceAreas: number };
+  cardRequired: boolean;
+  /** Marginal cost of one active free account per month. The number to watch. */
+  estimatedCostPerFreeAccountMonthly: number;
+  anchor: { showListPrice: boolean; headline: string; subhead: string; priceNote: string };
+  founding: { discountPercent: number; lockMonths: number; cohortCap: number; label: string };
+  convertsOn: 'manual' | 'date';
+}
 
 export const plans: Plan[] = [...data.plans].sort((a, b) => a.order - b.order);
 export const trial = data.trial;
 export const referral = data.referral;
 export const industryUnlock = data.industryUnlock;
+export const launch: LaunchConfig = data.launch;
 
 const byId = new Map<PlanId, Plan>(plans.map((p) => [p.id, p]));
 
@@ -219,6 +234,12 @@ export interface AccountState {
   seats?: number;
   /** Set once the account signs the FCRA marketing-use attestation. */
   fcraAttestedAt?: string | null;
+  /** On the free launch plan rather than a paid subscription. */
+  free?: boolean;
+  /** Joined during the free period, so the founding rate applies at conversion. */
+  foundingMember?: boolean;
+  /** Billing cycles the account has been active. Drives lifetime accrued value. */
+  cyclesActive?: number;
 }
 
 export interface Entitlements {
@@ -241,12 +262,17 @@ const integrationDefs = (platform as any).integrations as { id: string; minPlan:
 
 export function entitlements(state: AccountState): Entitlements {
   const p = plan(state.planId);
-  const limit = p.quota.industries;
+  // A free account borrows the granted plan's features but keeps its own,
+  // tighter quota — the features are what convinces them, the quota is what
+  // keeps the bill predictable.
+  const onFree = isFreeLaunch() && state.free === true;
+  const quota = onFree ? freeQuota() : p.quota;
+  const limit = quota.industries;
   const extraIndustries = isUnlimited(limit)
     ? 0
     : Math.max(0, state.industries.length - limit);
 
-  const seatLimit = p.quota.seats;
+  const seatLimit = quota.seats;
   const seatsOverLimit = !isUnlimited(seatLimit) && (state.seats ?? 1) > seatLimit;
 
   return {
@@ -262,7 +288,16 @@ export function entitlements(state: AccountState): Entitlements {
     capabilities: capabilityDefs.filter((c) => allows(p.id, c.minPlan)).map((c) => c.id),
     integrations: integrationDefs.filter((i) => allows(p.id, i.minPlan)).map((i) => i.id),
     restrictedSignals: !!state.fcraAttestedAt,
-    quota: quotaState(p.id, state.used ?? 0, state.purchased ?? 0),
+    // Free accounts have no overage to bill, so the cap is a stop rather than
+    // a charge — going over prompts an upgrade instead of an invoice.
+    quota: onFree
+      ? { ...quotaState(p.id, state.used ?? 0, state.purchased ?? 0),
+          included: quota.leadsPerMonth,
+          remaining: Math.max(0, (quota.leadsPerMonth ?? 0) - (state.used ?? 0)),
+          overage: 0,
+          overageCost: 0,
+          percentUsed: Math.round(((state.used ?? 0) / (quota.leadsPerMonth || 1)) * 100) }
+      : quotaState(p.id, state.used ?? 0, state.purchased ?? 0),
   };
 }
 
@@ -405,3 +440,143 @@ export function effectivePerLead(planId: PlanId): number | null {
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+// ---------------------------------------------------------------------------
+// Launch pricing
+// ---------------------------------------------------------------------------
+
+/**
+ * Free while the data is being proven out.
+ *
+ * The whole risk of a free tier is that it teaches people the product is worth
+ * nothing, and then the day it starts charging feels like a bait and switch.
+ * Two things prevent that, and both are mechanics rather than promises:
+ *
+ *   1. The list price never leaves the screen. `billedPrice` returns 0 while
+ *      `listPrice` keeps returning $29, and the UI shows both.
+ *   2. `accruedValue` tells the account what it would have been billed, every
+ *      cycle, from the first one. "So good you will not mind paying" is not
+ *      something you assert at the customer — it is something they work out
+ *      themselves, from a number, before you ever ask.
+ */
+export const isFreeLaunch = (): boolean => launch.mode === 'free-beta';
+
+/** The published price. Never changes during the free period — that is the point. */
+export const listPrice = (planId: PlanId): number => plan(planId).monthly;
+
+/** What the account is actually charged today. */
+export function billedPrice(planId: PlanId, account?: Pick<AccountState, 'free' | 'foundingMember'>): number {
+  if (isFreeLaunch() && account?.free !== false) return 0;
+  return account?.foundingMember ? foundingPrice(planId) : listPrice(planId);
+}
+
+/** Half price for twelve months, earned by showing up before there was a reason to. */
+export function foundingPrice(planId: PlanId): number {
+  const full = listPrice(planId);
+  return round2(full * (1 - launch.founding.discountPercent / 100));
+}
+
+/**
+ * Quota for a free account.
+ *
+ * Free is not unlimited, and the gap between those two words is the business.
+ * Places is billed per request and DNC scrubbing is licensed per record, so an
+ * uncapped free account is an open tab with somebody else's name on it. The
+ * cap is high enough that nobody feels metered — 300 leads is more than one
+ * person can work in a month — and low enough that the monthly bill is a
+ * number you can predict before it arrives.
+ */
+export function freeQuota(): PlanQuota {
+  const granted = plan(launch.grants).quota;
+  return {
+    leadsPerMonth: launch.freeQuota.leadsPerMonth,
+    industries: launch.freeQuota.industries,
+    seats: launch.freeQuota.seats,
+    serviceAreas: launch.freeQuota.serviceAreas,
+    savedSearches: granted.savedSearches,
+  };
+}
+
+/** What a hundred active free accounts costs you a month. Watch this number. */
+export const freeBurn = (activeAccounts: number): number =>
+  round2(activeAccounts * launch.estimatedCostPerFreeAccountMonthly);
+
+export interface AccruedValue {
+  leadsReleased: number;
+  cyclesActive: number;
+  /** The cheapest plan that would actually serve this usage. */
+  planThatFits: PlanId;
+  thisCycle: number;
+  toDate: number;
+  perLead: number | null;
+  /** What they will pay if they convert as a founding member. */
+  foundingRate: number;
+  headline: string;
+  detail: string;
+  /** Present only when the account has recorded closed work. */
+  roi?: string;
+}
+
+/**
+ * What this account would have been billed — the conversion argument, computed
+ * rather than claimed.
+ *
+ * Deliberately priced at the plan that genuinely fits their usage, not at the
+ * most expensive one they could be talked into. An inflated figure here is
+ * worse than no figure at all: the customer can check it against the public
+ * pricing page in about fifteen seconds, and if it does not reconcile, nothing
+ * else the product tells them survives.
+ */
+export function accruedValue(
+  usage: UsageProfile,
+  options: { cyclesActive?: number; closedJobs?: number; closedValue?: number } = {}
+): AccruedValue {
+  const cycles = Math.max(1, options.cyclesActive ?? 1);
+  const best = recommendPlan(usage).best;
+  const thisCycle = best.total;
+  const toDate = round2(thisCycle * cycles);
+  const perLead = usage.leadsPerMonth > 0 ? round2(thisCycle / usage.leadsPerMonth) : null;
+  const name = plan(best.planId).name;
+
+  const headline =
+    `${usage.leadsPerMonth.toLocaleString('en-US')} scored leads this month. ` +
+    `On ${name} that is ${usd(thisCycle)}${perLead !== null ? ` — ${centsPerLead(perLead)} a lead` : ''}.`;
+
+  const detail = cycles > 1
+    ? `Since you joined: ${(usage.leadsPerMonth * cycles).toLocaleString('en-US')} leads, ` +
+      `${usd(toDate)} of ${name} at list price. You have paid nothing.`
+    : `You have paid nothing. When billing starts your founding rate is ` +
+      `${usd(foundingPrice(best.planId))} a month for ${launch.founding.lockMonths} months.`;
+
+  // Only computed when the account has actually recorded closed work — an ROI
+  // line built from assumed close rates is a sales slide, not a number, and
+  // customers can tell the difference immediately.
+  //
+  // Revenue against cost over the *same period*. Dividing lifetime job value by
+  // one month's subscription is the multiplier every SaaS deck reaches for, and
+  // it is nonsense — it would read 1,400x here. A contractor can spot that in a
+  // second, and once they have spotted one inflated number they stop believing
+  // the honest ones next to it, which are the ones doing the work.
+  const roi =
+    options.closedJobs && options.closedValue && options.closedValue > 0
+      ? `${options.closedJobs} job${options.closedJobs === 1 ? '' : 's'} closed from these leads, ` +
+        `worth ${usd(options.closedValue)} in revenue — against ${usd(toDate)} of ${name} at list ` +
+        `over the same ${cycles} month${cycles === 1 ? '' : 's'}.`
+      : undefined;
+
+  return {
+    leadsReleased: usage.leadsPerMonth,
+    cyclesActive: cycles,
+    planThatFits: best.planId,
+    thisCycle,
+    toDate,
+    perLead,
+    foundingRate: foundingPrice(best.planId),
+    headline,
+    detail,
+    ...(roi ? { roi } : {}),
+  };
+}
+
+const centsPerLead = (n: number): string =>
+  n < 1 ? `${Math.round(n * 100)}¢` : usd(n);

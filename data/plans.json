@@ -192,5 +192,38 @@
   "annual": {
     "monthsCharged": 10,
     "label": "2 months free"
+  },
+  "launch": {
+    "mode": "free-beta",
+    "why": "Free while the data is being proven out. Nobody has heard of Marshall0, there is no case study yet, and a contractor's first question is whether the leads are real — which no pricing page can answer. Giving away the answer is cheaper than arguing about it, and an account that has already closed a job from these leads does not churn over $29.",
+    "grants": "pro",
+    "_grants_note": "Free accounts get the Pro feature set, not the Starter one. Handing someone the cut-down model and hoping they are impressed is the mistake — if the pitch is that it is good enough to pay for later, they have to see the thing they would be paying for.",
+    "freeQuota": {
+      "leadsPerMonth": 300,
+      "industries": 1,
+      "seats": 1,
+      "serviceAreas": 2
+    },
+    "_quota_note": "Free, not unlimited — and the difference is the whole business. Places is billed per request, DNC scrubbing is licensed per record, and imagery inference is licensed per lookup, so an uncapped free account is an open tab with somebody else's name on it. 300 is generous enough that nobody feels metered and bounded enough that the monthly bill is a number you can predict before it arrives.",
+    "cardRequired": false,
+    "_card_note": "No card, deliberately. The card exists on the 3-day trial to filter tyre-kickers out of a paid funnel; there is no paid funnel yet. Right now the scarce thing is contractors willing to tell you whether the leads were any good, and a card field costs more of those than it saves in compute.",
+    "estimatedCostPerFreeAccountMonthly": 4.5,
+    "_cost_note": "Roughly $0.015 per lead in marginal cost at 300 leads, assuming Places responses are cached against place_id and only cold parcels trigger a paid lookup. So about $4.50 a month per active free account, and around $450 at a hundred of them. That is the number to watch — when it stops being comfortable, the free quota is the dial, not the door.",
+    "anchor": {
+      "showListPrice": true,
+      "headline": "Free while we prove it",
+      "subhead": "Everything in Pro — 300 scored leads a month, full property enrichment, CRM export. No card.",
+      "priceNote": "$29/mo after launch. You will see exactly what you would have paid, every month, before we ever ask for it.",
+      "_anchor_note": "The list price stays visible the entire time. A product that has only ever been free reads as worth nothing, and the day it starts charging feels like a bait and switch — even at $9. Showing the number from day one means the eventual invoice is a confirmation rather than a surprise."
+    },
+    "founding": {
+      "discountPercent": 50,
+      "lockMonths": 12,
+      "cohortCap": 250,
+      "label": "Founding rate",
+      "_note": "Signing up during the free period earns half price for a year once billing starts. It gives the free period a reason to end that the customer benefits from, and it gives someone a reason to sign up this week instead of bookmarking it."
+    },
+    "convertsOn": "manual",
+    "_converts_note": "No countdown timer and no auto-charge. Billing starts when it is switched on deliberately, with notice, and every account that was here first keeps the founding rate. An auto-charge at the end of a free beta is how you convert goodwill into chargebacks."
   }
 }

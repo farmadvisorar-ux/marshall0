@@ -233,6 +233,60 @@ for (const p of plans) {
   if (!winners.has(p.id)) fail(`${p.id} is never the cheapest option for any tested usage — dead tier`);
 }
 
+// --- launch mode -----------------------------------------------------------
+
+var launch = plansData.launch;
+if (launch) {
+  if (['free-beta', 'paid'].indexOf(launch.mode) === -1) fail(`launch.mode "${launch.mode}" is not a mode`);
+  if (!planIds.has(launch.grants)) fail(`launch.grants "${launch.grants}" is not a plan`);
+
+  const granted = plans.find((p) => p.id === launch.grants);
+
+  // Free must never out-spec the plan it borrows from, or the paid tier it is
+  // meant to sell becomes a downgrade and nobody converts.
+  for (const key of ['leadsPerMonth', 'industries', 'seats', 'serviceAreas']) {
+    const free = launch.freeQuota[key];
+    const paid = granted.quota[key];
+    if (paid !== null && free > paid) {
+      fail(`launch.freeQuota.${key} (${free}) exceeds ${granted.id}'s own ${paid} — free would beat the plan it sells`);
+    }
+  }
+
+  // An uncapped free tier on per-request-billed sources is an open tab.
+  if (launch.freeQuota.leadsPerMonth === null || !(launch.freeQuota.leadsPerMonth > 0)) {
+    fail('launch.freeQuota.leadsPerMonth must be a positive number — free is not unlimited');
+  }
+
+  // The published price has to stay visible, or conversion reads as a bait
+  // and switch however fair the number is.
+  if (launch.mode === 'free-beta' && !launch.anchor?.showListPrice) {
+    fail('launch.anchor.showListPrice must be true in free-beta — a product that was only ever free reads as worth nothing');
+  }
+  if (launch.mode === 'free-beta' && !launch.anchor?.priceNote) {
+    fail('launch.anchor.priceNote must state what it will cost');
+  }
+
+  const disc = launch.founding?.discountPercent ?? 0;
+  if (disc <= 0 || disc >= 100) fail(`launch.founding.discountPercent ${disc} must be between 1 and 99`);
+  for (const p of plans) {
+    if (round2(p.monthly * (1 - disc / 100)) <= 0) fail(`founding discount zeroes out ${p.id}`);
+  }
+
+  // The burn has to be knowable before the invoice arrives.
+  if (!(launch.estimatedCostPerFreeAccountMonthly > 0)) {
+    fail('launch.estimatedCostPerFreeAccountMonthly must be set — an unmeasured free tier is an unbounded one');
+  }
+  const perLeadBurn = launch.estimatedCostPerFreeAccountMonthly / launch.freeQuota.leadsPerMonth;
+  const cheapestPaid = Math.min.apply(null, plans.filter((p) => p.quota.leadsPerMonth)
+    .map((p) => p.monthly / p.quota.leadsPerMonth));
+  if (perLeadBurn >= cheapestPaid) {
+    fail(
+      `free tier costs $${perLeadBurn.toFixed(4)}/lead to serve but the cheapest paid plan only ` +
+      `charges $${cheapestPaid.toFixed(4)}/lead — every conversion would lose money`
+    );
+  }
+}
+
 // --- capabilities, integrations, templates ---------------------------------
 
 for (const c of platform.capabilities) if (!planIds.has(c.minPlan)) fail(`capability ${c.id}: bad minPlan "${c.minPlan}"`);
@@ -270,7 +324,9 @@ if (problems.length) {
 }
 
 console.log(
-  `lead-finder OK — ${plans.length} plans, ${industries.modules.length} industry modules ` +
+  (launch ? `launch: ${launch.mode} (${launch.freeQuota.leadsPerMonth} leads free, ` +
+            `~$${launch.estimatedCostPerFreeAccountMonthly}/account/mo burn)\n` : '') +
+  `marshall0 OK — ${plans.length} plans, ${industries.modules.length} industry modules ` +
   `(${industries.modules.reduce((a, m) => a + m.signals.length, 0)} signals), ` +
   `${sourcesData.sources.length} sources, ${platform.capabilities.length} capabilities, ` +
   `${platform.outreachTemplates.length} templates`

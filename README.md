@@ -8,7 +8,7 @@ read it. No runtime dependencies and no framework, so this drops into an API, a
 Next app or a worker unchanged.
 
 ```
-data/plans.json        4 tiers, overage, lead packs, trial, referral
+data/plans.json        4 tiers, overage, lead packs, trial, referral, launch mode
 data/industries.json   8 industry modules — 52 weighted signals
 data/sources.json      24 data sources with access mode, trust and retention
 data/platform.json     capability stack, integrations, compliance, templates
@@ -16,15 +16,19 @@ src/plans.ts           entitlements, quota, overage, packs, upsell
 src/scoring.ts         explainable per-industry lead scoring
 src/identity-graph.ts  entity resolution and spiderweb expansion
 src/compliance.ts      DNC, CAN-SPAM, quiet hours, FCRA boundary
+src/sources/           NOAA storm events, county assessor and permits
+src/pipeline/          per-vertical wiring — records in, ranked leads out
 check.mjs              invariant validator
-demo.ts                runnable end-to-end walkthrough / smoke test
+demo.ts                platform walkthrough — 15 assertions
+demo-roofing.ts        the roofing vertical end to end — 26 assertions
 ```
 
 ```bash
 npm install
-npm run check   # typecheck + validate the commercial model
-npm run demo    # run the whole pipeline on sample data, 15 assertions
-npm test        # both
+npm run check         # typecheck + validate the commercial model
+npm run demo          # platform walkthrough, 15 assertions
+npm run demo:roofing  # the roofing vertical on Harrison County data, 26 assertions
+npm test              # all three
 ```
 
 Both run in CI on every push, because the model lives in JSON and a repricing
@@ -96,6 +100,110 @@ plan against real usage and returns whichever wins — including *stay put*, and
 including *downgrade*. An Elite account pulling 40 leads a month gets told to
 move to Starter. That costs $70/month in revenue and buys an account that does
 not cancel the first time they do the arithmetic themselves, because they will.
+
+---
+
+## Launch pricing — free, for now
+
+`launch.mode` is `free-beta`. Free accounts get the **Pro feature set** on a
+**300-lead cap**, no card.
+
+The features are Pro's on purpose: if the pitch is that this is worth paying
+for later, they have to see the thing they would be paying for. Handing someone
+the cut-down model and hoping they are impressed is the mistake.
+
+The cap is the part that matters commercially. Free is not unlimited, and the
+gap between those two words is the business — Places is billed per request,
+DNC scrubbing is licensed per record, imagery inference is licensed per lookup.
+An uncapped free account is an open tab with your name on it. At 300 leads the
+marginal cost is about **$4.50 per active account per month**, so a hundred of
+them is $450 and you can see it coming. `check.mjs` fails the build if the free
+tier ever costs more per lead to serve than the cheapest paid plan charges.
+
+**Two mechanics keep the eventual conversion from feeling like a bait and switch:**
+
+**The list price never leaves the screen.** `billedPrice()` returns $0 while
+`listPrice()` keeps returning $29, and the UI shows both. A product that has
+only ever been free reads as worth nothing, and the day it starts charging
+feels like a trick — even at $9.
+
+**`accruedValue()` shows them the bill they did not get.** Every cycle:
+
+```
+214 scored leads this month. On Pro that is $29 — 14¢ a lead.
+Since you joined: 856 leads, $116 of Pro at list price. You have paid nothing.
+3 jobs closed from these leads, worth $41,200 in revenue —
+against $116 of Pro at list over the same 4 months.
+```
+
+Priced at the plan that genuinely fits their usage, not the dearest one they
+could be talked into — the customer can check it against the public pricing
+page in fifteen seconds, and if it does not reconcile, nothing else the product
+tells them survives. The ROI line compares revenue to cost over the *same
+period* for the same reason: dividing lifetime job value by one month's
+subscription reads as 1,400x, and a contractor spots that instantly.
+
+Signing up during the free period earns the **founding rate** — half price for
+twelve months, applied whenever billing is switched on. No countdown, no
+auto-charge: an auto-charge at the end of a free beta converts goodwill into
+chargebacks.
+
+---
+
+## The roofing vertical
+
+The first module wired end to end. `src/sources/` reads the real records,
+`src/pipeline/roofing.ts` turns them into ranked leads.
+
+**NOAA Storm Events** (`sources/noaa-storm.ts`) parses the published detail CSVs
+and answers "what hit this parcel, when, and how hard". Three things in that
+format bite immediately:
+
+- **MAGNITUDE means different units per event type** — hail in inches, wind in
+  knots. Reading both as one number puts a 65-knot gust on the same scale as
+  1.75-inch hail, which scores a windy day as a roof replacement. Wind is
+  converted to mph on parse.
+- **Sub-inch hail is weather, not a claim.** Below about an inch, asphalt takes
+  bruising an adjuster will not pay for. Counting those events inflates every
+  score in the county and sends crews to doors where there is no claim.
+- **Coordinates are often missing.** A report pinned only to the county is real
+  weather but it is *not* evidence about a particular roof, so it is counted
+  separately, never scored, and never used as the email hook. "The 14 May hail
+  ran right through your street" only works if it is true — you are saying it
+  to someone who was standing there.
+
+Events are bucketed into ~0.25° cells, so a query touches a handful of buckets
+regardless of how many years of history are loaded.
+
+**Assessor and permits** (`sources/property.ts`) derive roof age from the most
+recent roofing permit, falling back to year built. Permit vocabulary varies by
+county but the words do not — `reroof`, `re-roof`, `tear off`, `comp shingle`
+all match, and withdrawn or voided permits are ignored. Owner-occupancy comes
+from mailing address against situs address, which is the strongest single
+predictor of who can say yes on a doorstep and costs nothing to compute.
+
+The fallback is the weak claim and is marked as such. A 1974 house with no
+roofing permit is probably already on its second roof, which is why the module
+scores 31-plus years *lower* than the 20-30 band: past a point, the absence of
+a permit stops being evidence of an old roof and starts being evidence of
+unpermitted work.
+
+**Ranked output** on real Harrison County shapes:
+
+```
+ 78 B  1180 Cottonwood Rd   28yr roof (yearBuilt)  hail 2 @ 1.75"  owner-occupier
+ 53 C  1260 Cottonwood Rd   35yr roof              hail 2 @ 1.75"  small-landlord (3)
+ 48 C  88 Ridgeline Dr      32yr roof              hail 0          8km outside the swath
+ 41 C  1204 Cottonwood Rd   3.1yr roof (permit)    hail 2 @ 1.75"  re-roofed in 2023
+```
+
+The 3-year-old roof sits at the bottom despite being in the middle of the hail
+swath, which is the entire point of the module — a generic scraper would have
+put it near the top for being a house in a storm zone.
+
+Leads that cannot be contacted **do not draw down quota**. Charging a lead
+credit for a row somebody is not allowed to call is the kind of detail that
+loses an account permanently.
 
 ---
 
@@ -279,13 +387,20 @@ purposes and marketing is not among them.
 
 ## Status
 
-**In this repo** — the commercial model, all eight scoring modules, entity
-resolution, spiderweb expansion, the compliance gates, the outreach renderer,
-and 15 end-to-end assertions in `demo.ts`.
+**In this repo** — the commercial model with free-beta launch pricing, all
+eight scoring modules, entity resolution, spiderweb expansion, the compliance
+gates, the outreach renderer, and the **roofing vertical wired end to end** with
+its NOAA, assessor and permit adapters. 41 assertions across the two demos.
 
-**Not yet** — the ingest workers that populate `SourceRecord[]`, the Stripe
-wiring, the dashboard, and the LLM call behind outreach generation. The engines
-define the interfaces those plug into; `demo.ts` shows the shapes.
+**Not yet** — the ingest workers that fetch and schedule (the adapters parse and
+score; nothing polls NOAA or a county portal yet), Stripe wiring, the dashboard,
+and the LLM call behind outreach generation. The engines define the interfaces
+those plug into and the demos show the shapes.
+
+**Next for roofing**: point the NOAA adapter at the live NCEI feed on a daily
+schedule, then one county — Harrison — assessor and permit end to end. Those
+two make the module real; every other county after that is the same work again,
+which is exactly why it is the moat.
 
 Ingest is the long pole and it is not evenly distributed: roughly 3,100 county
 assessor and permit systems, each with its own format and cadence. That work is

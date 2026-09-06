@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AI Lead Finder — pricing model, industry scoring modules, identity resolution and the compliance layer.",
-  "engines": { "node": ">=20" },
+  "description": "AI Lead Finder \u2014 pricing model, industry scoring modules, identity resolution and the compliance layer.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "check": "tsc -p tsconfig.json && node check.mjs",
     "demo": "tsc -p tsconfig.demo.json && printf '{\"type\":\"commonjs\"}' > .build/package.json && node .build/demo.js",
-    "test": "npm run check && npm run demo"
+    "test": "npm run check && npm run demo && npm run demo:roofing",
+    "demo:roofing": "tsc -p tsconfig.demo.json && printf '{\"type\":\"commonjs\"}' > .build/package.json && node .build/demo-roofing.js"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
