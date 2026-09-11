@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AI Lead Finder \u2014 pricing model, industry scoring modules, identity resolution and the compliance layer.",
+  "description": "AI Lead Finder — pricing model, industry scoring modules, identity resolution and the compliance layer.",
   "engines": {
     "node": ">=20"
   },
@@ -15,5 +15,8 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0"
   }
 }
