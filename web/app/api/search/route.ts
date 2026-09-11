@@ -1,250 +1,156 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { sql } from '@vercel/postgres';
-import { entitlements, quotaState } from '@engine';
+import {
+  getAccountByClerkId,
+  getServiceArea,
+  countLeadsSince,
+  currentCycleStart,
+  upsertLead,
+  type LeadInput,
+} from '@/lib/db';
+import { entitlements, type PlanId } from '@engine';
 
-export async function POST(request: NextRequest) {
-  const { userId } = await auth();
-
+export async function POST(request: Request) {
+  const { userId } = auth();
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Get account
-  let account;
-  try {
-    const result = await sql`
-      SELECT id, user_id, plan_id, free, founding_member
-      FROM accounts
-      WHERE clerk_id = ${userId}
-    `;
-    account = result.rows[0];
-  } catch (error) {
-    console.error('Failed to fetch account:', error);
-    return NextResponse.json({ error: 'Account not found' }, { status: 404 });
-  }
-
+  const account = await getAccountByClerkId(userId);
   if (!account) {
     return NextResponse.json({ error: 'Account not found' }, { status: 404 });
   }
 
+  let body: { serviceAreaId?: string; industry?: string; minScore?: number };
   try {
-    const body = await request.json();
-    const { serviceAreaId, industry, minScore, filters } = body;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
 
-    if (!serviceAreaId || !industry) {
-      return NextResponse.json(
-        { error: 'Missing required fields: serviceAreaId, industry' },
-        { status: 400 }
-      );
-    }
+  const { serviceAreaId, industry = 'roofing', minScore = 0 } = body;
+  if (!serviceAreaId) {
+    return NextResponse.json({ error: 'Pick a service area' }, { status: 400 });
+  }
 
-    // Get service area
-    let serviceArea;
-    try {
-      const result = await sql`
-        SELECT id, name, county_fips, state
-        FROM service_areas
-        WHERE id = ${serviceAreaId} AND account_id = ${account.id}
-      `;
-      serviceArea = result.rows[0];
-    } catch (error) {
-      console.error('Failed to fetch service area:', error);
-      return NextResponse.json(
-        { error: 'Service area not found' },
-        { status: 404 }
-      );
-    }
+  const serviceArea = await getServiceArea(account.id, serviceAreaId);
+  if (!serviceArea) {
+    return NextResponse.json({ error: 'Service area not found' }, { status: 404 });
+  }
 
-    if (!serviceArea) {
-      return NextResponse.json(
-        { error: 'Service area not found' },
-        { status: 404 }
-      );
-    }
+  const used = await countLeadsSince(account.id, currentCycleStart());
+  const ent = entitlements({
+    planId: account.plan_id as PlanId,
+    industries: [industry],
+    used,
+    free: account.free,
+    foundingMember: account.founding_member,
+  });
 
-    // Check quota
-    const entitlementInfo = entitlements({
-      plan_id: account.plan_id,
-      free: account.free,
-      founding_member: account.founding_member,
-    });
-
-    // Get current month's lead count
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-    let monthlyLeadsCount = 0;
-    try {
-      const result = await sql`
-        SELECT COUNT(*) as count
-        FROM leads
-        WHERE account_id = ${account.id} AND created_at >= ${monthStart}
-      `;
-      monthlyLeadsCount = parseInt(result.rows[0].count as string, 10);
-    } catch (error) {
-      console.error('Failed to fetch monthly leads:', error);
-    }
-
-    const quota = quotaState({
-      plan_id: account.plan_id,
-      leadsReleased: monthlyLeadsCount,
-      free: account.free,
-    });
-
-    if (!quota.available) {
-      return NextResponse.json(
-        {
-          error: 'Monthly quota exceeded',
-          current: quota.leadsUsed,
-          limit: entitlementInfo.leadsPerMonth,
-        },
-        { status: 429 }
-      );
-    }
-
-    // TODO: Integrate with actual data sources
-    // 1. Fetch parcels from assessor service for the area
-    // 2. Fetch permits for those parcels
-    // 3. Fetch storm events from NOAA
-    // 4. Run roofing pipeline
-    // For now, return mock data for demo
-
-    const mockLeads = generateMockLeads(account.id as string, serviceArea, minScore);
-
-    // Write leads to database
-    let insertedCount = 0;
-    try {
-      for (const lead of mockLeads) {
-        await sql`
-          INSERT INTO leads (
-            account_id, service_area_id, industry, parcel_id,
-            address, city, state, owner_name,
-            signals, contributions, score, storm, roof, owner, hook,
-            status, created_at, updated_at
-          ) VALUES (
-            ${account.id}, ${serviceArea.id}, ${industry}, ${lead.parcelId},
-            ${lead.address}, ${lead.city}, ${lead.state}, ${lead.ownerName},
-            ${JSON.stringify(lead.signals)}, ${JSON.stringify(lead.contributions)},
-            ${JSON.stringify(lead.score)}, ${JSON.stringify(lead.storm)},
-            ${JSON.stringify(lead.roof)}, ${JSON.stringify(lead.owner)}, ${lead.hook},
-            'available', NOW(), NOW()
-          )
-        `;
-        insertedCount++;
-      }
-    } catch (error) {
-      console.error('Failed to insert leads:', error);
-      return NextResponse.json(
-        { error: 'Failed to save leads', details: error instanceof Error ? error.message : 'Unknown error' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      leads: mockLeads,
-      count: insertedCount,
-    });
-  } catch (error) {
-    console.error('Search error:', error);
+  if (ent.quota.remaining !== null && ent.quota.remaining <= 0) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Search failed' },
-      { status: 500 }
+      {
+        error: `You have used all ${ent.quota.included} leads in this month's quota.`,
+        used: ent.quota.used,
+        included: ent.quota.included,
+      },
+      { status: 429 }
     );
   }
+
+  const candidates = demoLeads(serviceArea.state || 'TX').filter(
+    (lead) => lead.score.value >= minScore
+  );
+  // Never release more than the quota allows, even when the search matches more.
+  const released =
+    ent.quota.remaining === null ? candidates : candidates.slice(0, ent.quota.remaining);
+
+  try {
+    for (const lead of released) {
+      await upsertLead(account.id, serviceArea.id, industry, lead as LeadInput);
+    }
+  } catch (error) {
+    console.error('Failed to save leads:', error);
+    return NextResponse.json({ error: 'Failed to save leads' }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    leads: released,
+    count: released.length,
+    // Until the assessor, permit and NOAA feeds are connected to live
+    // endpoints, these are worked examples rather than real parcels. Saying so
+    // in the payload keeps a demo from being mistaken for a territory.
+    demo: true,
+  });
 }
 
-function generateMockLeads(accountId: string, serviceArea: any, minScore: number) {
-  // Demo mock leads for testing the UI
-  const leads = [
+function demoLeads(state: string) {
+  return [
     {
       parcelId: 'R-8801-001',
       address: '512 West Grand Avenue',
       city: 'Marshall',
-      state: 'TX',
-      ownerName: 'John Smith',
-      score: {
-        value: Math.max(minScore, 72),
-        grade: 'A',
-      },
+      state,
+      ownerName: 'J. Whitfield',
+      score: { value: 82, grade: 'A' },
       signals: {
         hailEventsLast3y: 3,
-        hailMaxInches: 1.2,
-        windEventsLast3y: 1,
-        roofAgeYears: 15,
+        hailMaxInches: 1.75,
+        roofAgeYears: 17,
         ownerOccupied: true,
       },
-      contributions: {
-        hailEventsLast3y: 25,
-        hailMaxInches: 12,
-        roofAgeYears: 35,
-      },
+      contributions: { hailMaxInches: 31, roofAgeYears: 28, hailEventsLast3y: 15 },
       storm: {
         hailEventsLast3y: 3,
-        hailMaxInches: 1.2,
-        lastHailDate: '2024-05-14',
-        daysSinceLastHail: 240,
+        hailEventsCountyWide: 6,
+        hailMaxInches: 1.75,
+        lastHailDate: '2025-04-28',
       },
-      roof: {
-        ageYears: 15,
-        ageConfidence: 0.95,
-        material: 'composition',
-      },
-      owner: {
-        occupied: true,
-        portfolioSize: 1,
-        segment: 'owner-occupier',
-      },
-      release: {
-        permitted: true,
-        withheldReason: null,
-      },
-      hook: 'Hail damage reported nearby on May 14, 2024 — your roof was already 12 years old.',
+      roof: { ageYears: 17, ageConfidence: 0.9, material: 'composition' },
+      owner: { occupied: true, portfolioSize: 1, segment: 'owner-occupier' },
+      hook: 'Golf-ball hail was recorded on your street on April 28, 2025, on a roof already 17 years old.',
     },
     {
       parcelId: 'R-8801-002',
       address: '1180 Cottonwood Road',
       city: 'Marshall',
-      state: 'TX',
-      ownerName: 'Jane Doe',
-      score: {
-        value: Math.max(minScore, 58),
-        grade: 'B',
-      },
+      state,
+      ownerName: 'M. Orozco',
+      score: { value: 64, grade: 'B' },
       signals: {
-        hailEventsLast3y: 2,
-        hailMaxInches: 0.8,
-        windEventsLast3y: 0,
-        roofAgeYears: 18,
+        hailEventsLast3y: 1,
+        hailMaxInches: 1.0,
+        roofAgeYears: 21,
         ownerOccupied: true,
       },
-      contributions: {
-        hailEventsLast3y: 20,
-        roofAgeYears: 36,
-      },
+      contributions: { roofAgeYears: 34, hailMaxInches: 18, hailEventsLast3y: 8 },
       storm: {
-        hailEventsLast3y: 2,
-        hailMaxInches: 0.8,
+        hailEventsLast3y: 1,
+        hailEventsCountyWide: 6,
+        hailMaxInches: 1.0,
         lastHailDate: '2024-06-02',
-        daysSinceLastHail: 226,
       },
-      roof: {
-        ageYears: 18,
-        ageConfidence: 0.9,
-        material: 'composition',
-      },
-      owner: {
-        occupied: true,
-        portfolioSize: 1,
-        segment: 'owner-occupier',
-      },
-      release: {
-        permitted: true,
-        withheldReason: null,
-      },
-      hook: 'Hail activity in the county — roof is 18 years old.',
+      roof: { ageYears: 21, ageConfidence: 0.75, material: 'composition' },
+      owner: { occupied: true, portfolioSize: 1, segment: 'owner-occupier' },
+      hook: 'A 21-year-old roof that took quarter-size hail in June 2024 — past the point most carriers still pay full replacement.',
     },
-  ].filter((lead) => lead.score.value >= minScore);
-
-  return leads;
+    {
+      parcelId: 'R-8802-114',
+      address: '77 Pinecrest Drive',
+      city: 'Hallsville',
+      state,
+      ownerName: 'Redbud Holdings LLC',
+      score: { value: 41, grade: 'C' },
+      signals: {
+        hailEventsLast3y: 0,
+        roofAgeYears: 14,
+        ownerOccupied: false,
+      },
+      contributions: { roofAgeYears: 22, ownerOccupied: 9 },
+      storm: { hailEventsLast3y: 0, hailEventsCountyWide: 6 },
+      roof: { ageYears: 14, ageConfidence: 0.6, material: 'architectural' },
+      owner: { occupied: false, portfolioSize: 7, segment: 'portfolio-landlord' },
+      hook: 'Seven-parcel owner with a 14-year-old roof here — worth a portfolio conversation, not a storm pitch.',
+    },
+  ];
 }

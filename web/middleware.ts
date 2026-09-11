@@ -7,12 +7,19 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks(.*)',
 ]);
 
-export default clerkMiddleware((auth, request) => {
-  // Protect non-public routes
-  if (!isPublicRoute(request)) {
-    auth().protect();
-  }
-});
+// signInUrl is set explicitly rather than read from NEXT_PUBLIC_CLERK_SIGN_IN_URL:
+// without it Clerk redirects signed-out visitors to its default /sign-in, which
+// this app does not serve, and a protected page 404s instead of asking them to
+// log in. API routes still get a 404 from protect(), which is what we want —
+// an unauthenticated POST should not be told the route exists.
+export default clerkMiddleware(
+  (auth, request) => {
+    if (!isPublicRoute(request)) {
+      auth().protect();
+    }
+  },
+  { signInUrl: '/login' }
+);
 
 export const config = {
   matcher: [
