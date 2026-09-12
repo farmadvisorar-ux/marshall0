@@ -683,3 +683,48 @@ export async function mappableAreas(accountId: string): Promise<MappableArea[]> 
     ORDER BY p.count DESC, s.name
   `) as MappableArea[];
 }
+
+export type HealthCheck = {
+  ok: boolean;
+  latencyMs: number;
+  error?: string;
+  tables?: Record<string, number | null>;
+};
+
+/**
+ * Liveness for the database.
+ *
+ * Row counts come from the planner's estimates in pg_class rather than
+ * COUNT(*): a monitor hits this every thirty seconds, and counting 319,576
+ * storm events each time to prove the connection is up would cost more than
+ * the thing it is checking. The numbers are approximate by design — this
+ * answers "is the schema there and populated", not "how many exactly".
+ *
+ * A table that has never been analysed reports reltuples = -1, which means
+ * unknown, not empty. It is returned as null: a monitor that reads 0 accounts
+ * and pages someone is worse than one that reads nothing at all.
+ */
+export async function healthCheck(): Promise<HealthCheck> {
+  const started = Date.now();
+  try {
+    const rows = (await db()`
+      SELECT relname AS table,
+             CASE WHEN reltuples < 0 THEN NULL ELSE reltuples::bigint END AS rows
+      FROM pg_class
+      WHERE relnamespace = 'public'::regnamespace
+        AND relkind = 'r'
+        AND relname IN ('counties', 'parcels', 'storm_events', 'accounts', 'leads')
+    `) as { table: string; rows: string | null }[];
+
+    const tables: Record<string, number | null> = {};
+    for (const r of rows) tables[r.table] = r.rows === null ? null : Number(r.rows);
+
+    return { ok: true, latencyMs: Date.now() - started, tables };
+  } catch (error) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : 'unknown error',
+    };
+  }
+}

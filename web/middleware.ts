@@ -5,6 +5,8 @@ const isPublicRoute = createRouteMatcher([
   '/login(.*)',
   '/signup(.*)',
   '/api/webhooks(.*)',
+  // An uptime monitor cannot sign in.
+  '/api/health',
 ]);
 
 // signInUrl is set explicitly rather than read from NEXT_PUBLIC_CLERK_SIGN_IN_URL:
