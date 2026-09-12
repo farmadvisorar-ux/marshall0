@@ -1,35 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-
-type Storm = {
-  id: string;
-  type: string;
-  date: string;
-  magnitude: number | null;
-  lat: number;
-  lng: number;
-  distanceKm: number;
-};
-
-type Property = {
-  id: string;
-  parcelId: string | null;
-  address: string | null;
-  city: string | null;
-  ownerName: string | null;
-  ownerOccupied: boolean | null;
-  yearBuilt: number | null;
-  lat: number;
-  lng: number;
-  damageScore: number;
-  grade: string;
-  hailEventsLast3y: number;
-  hailMaxInches: number | null;
-  lastHailDate: string | null;
-};
+import { useStormData } from '../../hooks/useStormData';
+import type { Storm, PropertyLead } from '@/lib/api-types';
 
 /**
  * Hail is drawn larger and redder as it gets bigger, because size is the whole
@@ -63,47 +38,11 @@ export function StormMap({
   centerLng: number;
   label: string;
 }) {
-  const [storms, setStorms] = useState<Storm[]>([]);
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [radiusKm, setRadiusKm] = useState(8);
   const [center, setCenter] = useState<[number, number]>([centerLat, centerLng]);
   const initial = useRef<[number, number]>([centerLat, centerLng]);
 
-  const load = useCallback(
-    async (lat: number, lng: number, radius: number, signal: AbortSignal) => {
-      setLoading(true);
-      setError('');
-      try {
-        const res = await fetch(`/api/storms?lat=${lat}&lng=${lng}&radiusKm=${radius}`, { signal });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? 'Failed to load storm data');
-        setStorms(json.storms ?? []);
-        setProperties(json.properties ?? []);
-        setLoading(false);
-      } catch (err) {
-        // An abort is this component superseding its own request, not a failure
-        // the contractor needs to read about.
-        if (signal.aborted) return;
-        setError(err instanceof Error ? err.message : 'Failed to load storm data');
-        setLoading(false);
-      }
-    },
-    []
-  );
-
-  // Dragging the radius slider fires a change per step, so the request waits
-  // for the drag to settle. Aborting the previous one also means a slow early
-  // response can never overwrite a fast later one.
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => load(center[0], center[1], radiusKm, controller.signal), 250);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [center, radiusKm, load]);
+  const { storms, properties, loading, error } = useStormData(center[0], center[1], radiusKm);
 
   const moved =
     Math.abs(center[0] - initial.current[0]) > 1e-6 ||
@@ -184,7 +123,7 @@ export function StormMap({
             pathOptions={{ color: '#2563eb', weight: 1, fill: false, dashArray: '6 6' }}
           />
 
-          {storms.map((s) => {
+          {storms.map((s: Storm) => {
             const style = stormStyle(s);
             return (
               <CircleMarker
@@ -215,7 +154,7 @@ export function StormMap({
             );
           })}
 
-          {properties.map((p) => (
+          {properties.map((p: PropertyLead) => (
             <CircleMarker
               key={p.id}
               center={[p.lat, p.lng]}

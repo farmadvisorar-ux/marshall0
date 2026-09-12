@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getAccountByClerkId, stormsNearPoint, parcelsNearPoint } from '@/lib/db';
 import { scoreLead } from '@engine';
+import type { StormImpactResponse, PropertyLead } from '@/lib/api-types';
 
 export const maxDuration = 30;
 
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
     ]);
 
     const thisYear = new Date().getFullYear();
-    const properties = nearby.map((p) => {
+    const properties: PropertyLead[] = nearby.map((p) => {
       const roofAgeYears = p.year_built ? thisYear - p.year_built : undefined;
       const hailMax = p.hail_max_in ? Number(p.hail_max_in) : null;
       const claim =
@@ -85,7 +86,7 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({
+    const body: StormImpactResponse = {
       center: { lat, lng, radiusKm },
       storms: storms.map((s) => ({
         id: s.event_id,
@@ -100,7 +101,9 @@ export async function GET(request: Request) {
       })),
       properties,
       counts: { storms: storms.length, properties: properties.length },
-    });
+    };
+
+    return NextResponse.json(body);
   } catch (error) {
     console.error('Storm impact query failed:', error);
     return NextResponse.json({ error: 'Failed to load storm impacts' }, { status: 500 });

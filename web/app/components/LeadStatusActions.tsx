@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { setLeadStatus } from '@/lib/api';
 
 const ACTIONS: { status: string; label: string; tone: string }[] = [
   { status: 'contacted', label: 'Mark contacted', tone: 'bg-blue-600 hover:bg-blue-700 text-white' },
@@ -30,13 +31,7 @@ export function LeadStatusActions({
     setPending(next);
     setError('');
     try {
-      const res = await fetch(`/api/leads/${encodeURIComponent(parcelId)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Could not update');
+      const data = await setLeadStatus(parcelId, next);
       setStatus(data.lead.status);
       // The list and dashboard counts read from the server, so they need to
       // re-fetch rather than drift from what this page now shows.
