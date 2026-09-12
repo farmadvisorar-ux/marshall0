@@ -34,6 +34,8 @@ type Result = {
   count: number;
   scanned?: number;
   parcelsAvailable: boolean;
+  sourceAvailable?: boolean;
+  sourceLabel?: string | null;
   parcelsInCounty?: number;
   county?: { fips: string; name: string };
   storm?: Storm;
@@ -51,6 +53,8 @@ export function SearchForm({ serviceAreas: initial }: { serviceAreas: ServiceAre
   const [countyQuery, setCountyQuery] = useState('');
   const [matches, setMatches] = useState<County[]>([]);
   const [adding, setAdding] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestNote, setIngestNote] = useState('');
 
   const findCounties = async (q: string) => {
     setCountyQuery(q);
@@ -83,6 +87,43 @@ export function SearchForm({ serviceAreas: initial }: { serviceAreas: ServiceAre
     }
   };
 
+  const loadParcels = async (fips: string) => {
+    setIngesting(true);
+    setIngestNote('');
+    setError('');
+    try {
+      const res = await fetch('/api/parcels/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fips }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Could not load parcels');
+      setIngestNote(
+        data.status === 'no-source'
+          ? data.message
+          : `Loaded ${Number(data.loaded).toLocaleString()} parcels — ${Number(data.total).toLocaleString()} now on file.` +
+            (data.status === 'partial' ? ' More remain; run it again to continue.' : '')
+      );
+      if (data.total > 0) await runSearch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load parcels');
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const runSearch = async () => {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceAreaId, industry: 'roofing', minScore }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? 'Search failed');
+    setResult(data);
+  };
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -90,15 +131,9 @@ export function SearchForm({ serviceAreas: initial }: { serviceAreas: ServiceAre
     if (!serviceAreaId) return setError('Add a county first.');
 
     setLoading(true);
+    setIngestNote('');
     try {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceAreaId, industry: 'roofing', minScore }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Search failed');
-      setResult(data);
+      await runSearch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
     } finally {
@@ -221,9 +256,27 @@ export function SearchForm({ serviceAreas: initial }: { serviceAreas: ServiceAre
         {result && !result.parcelsAvailable && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
             <h3 className="font-semibold text-amber-900 dark:text-amber-100 mb-1">
-              No parcel source connected for this county yet
+              {result.sourceAvailable
+                ? 'Parcels not loaded for this county yet'
+                : 'No open parcel source for this county yet'}
             </h3>
             <p className="text-sm text-amber-800 dark:text-amber-200">{result.message}</p>
+            {result.sourceAvailable && result.county && (
+              <button
+                type="button"
+                disabled={ingesting}
+                onClick={() => loadParcels(result.county!.fips)}
+                className="mt-4 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white font-semibold py-2 px-5 rounded-lg transition-colors"
+              >
+                {ingesting ? 'Loading parcels…' : 'Load parcels for this county'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {ingestNote && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 text-sm text-blue-900 dark:text-blue-100">
+            {ingestNote}
           </div>
         )}
 

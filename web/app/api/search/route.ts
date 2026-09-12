@@ -11,6 +11,7 @@ import {
   upsertLead,
 } from '@/lib/db';
 import { entitlements, scoreLead, type PlanId } from '@engine';
+import { sourceForCounty } from '@engine/parcel-sources';
 
 export const maxDuration = 60;
 
@@ -57,18 +58,23 @@ export async function POST(request: Request) {
     countyParcelCount(area.county_fips),
   ]);
 
-  // No parcel source wired for this county yet. Return the storm record, which
-  // is real and measured, rather than inventing properties to fill the page.
+  // Nothing loaded yet. Whether that is fixable depends on there being an open
+  // roll for this county at all, and the two cases need different words: one is
+  // a button, the other is a limit the customer should hear plainly.
   if (parcelCount === 0) {
+    const source = sourceForCounty(area.county_fips);
     return NextResponse.json({
       leads: [],
       count: 0,
       parcelsAvailable: false,
+      sourceAvailable: Boolean(source),
+      sourceLabel: source?.label ?? null,
       county: { fips: area.county_fips, name: area.name },
       storm,
-      message:
-        `No parcel source is connected for ${area.name} yet, so there are no addresses to score. ` +
-        `The storm record for this county is real and shown above.`,
+      message: source
+        ? `${area.name} has an open parcel roll (${source.label}) that has not been loaded yet.`
+        : `No open parcel source is wired for ${area.name} yet, so there are no addresses to score. ` +
+          `The storm record above is real and measured.`,
     });
   }
 

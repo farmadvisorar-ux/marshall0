@@ -167,6 +167,83 @@ export async function getLead(accountId: string, parcelId: string): Promise<Lead
   return rows[0] ?? null;
 }
 
+export type ParcelInsert = {
+  id: string;
+  county_fips: string;
+  parcel_no: string | null;
+  owner_name: string | null;
+  owner_name2: string | null;
+  site_address: string;
+  site_city: string | null;
+  site_state: string | null;
+  site_zip: string | null;
+  mail_address: string | null;
+  mail_city: string | null;
+  absentee_owner: boolean | null;
+  owner_is_org: boolean;
+  year_built: number | null;
+  parcel_value: number | null;
+  improvement_value: number | null;
+  land_use: string | null;
+  acres: number | null;
+  lat: number | null;
+  lon: number | null;
+  source: string;
+};
+
+const PARCEL_COLS: (keyof ParcelInsert)[] = [
+  'id', 'county_fips', 'parcel_no', 'owner_name', 'owner_name2', 'site_address', 'site_city',
+  'site_state', 'site_zip', 'mail_address', 'mail_city', 'absentee_owner', 'owner_is_org',
+  'year_built', 'parcel_value', 'improvement_value', 'land_use', 'acres', 'lat', 'lon', 'source',
+];
+
+/**
+ * Bulk upsert of a parcel batch.
+ *
+ * Rows are collapsed on id first: Postgres refuses an ON CONFLICT that touches
+ * the same row twice in one statement, and a multi-polygon parcel arrives as
+ * several features sharing one parcel number. Collapsing is also the
+ * de-duplication the customer needs — one roof, one lead.
+ */
+export async function insertParcels(rows: ParcelInsert[]): Promise<number> {
+  if (!rows.length) return 0;
+  const unique = [...new Map(rows.map((r) => [r.id, r])).values()];
+  const n = PARCEL_COLS.length;
+  const placeholders = unique
+    .map((_, i) => '(' + PARCEL_COLS.map((__, j) => `$${i * n + j + 1}`).join(',') + ')')
+    .join(',');
+  const params = unique.flatMap((r) => PARCEL_COLS.map((c) => r[c] ?? null));
+
+  await db().query(
+    `INSERT INTO parcels (${PARCEL_COLS.join(',')}) VALUES ${placeholders}
+     ON CONFLICT (id) DO UPDATE SET
+       owner_name = excluded.owner_name, site_address = excluded.site_address,
+       site_city = excluded.site_city, site_zip = excluded.site_zip,
+       mail_address = excluded.mail_address, absentee_owner = excluded.absentee_owner,
+       owner_is_org = excluded.owner_is_org, year_built = excluded.year_built,
+       parcel_value = excluded.parcel_value, improvement_value = excluded.improvement_value,
+       lat = excluded.lat, lon = excluded.lon, updated_at = NOW()`,
+    params
+  );
+  return unique.length;
+}
+
+export async function recordSourceRun(
+  id: string,
+  label: string,
+  state: string,
+  url: string,
+  fips: string,
+  rows: number
+): Promise<void> {
+  await db()`
+    INSERT INTO parcel_sources (id, name, state, url, field_map, counties, last_run_at, last_run_rows)
+    VALUES (${id}, ${label}, ${state}, ${url}, '{}'::jsonb, ${fips}, NOW(), ${rows})
+    ON CONFLICT (id) DO UPDATE SET
+      last_run_at = NOW(), last_run_rows = ${rows}, counties = ${fips}
+  `;
+}
+
 export type CountyRow = {
   fips: string;
   state: string;
