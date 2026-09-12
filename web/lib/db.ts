@@ -102,11 +102,13 @@ export async function provisionAccount(
   `) as Account[];
   const account = accountRows[0];
 
-  // A brand new account with no territory can run no searches, so seed the
-  // demo county the roofing pipeline already has NOAA coverage for.
+  // A brand new account with no territory can run no searches, so seed one
+  // county that has both a parcel roll and storm history loaded. Not labelled
+  // a demo, because it is not one: the search over it returns real owners at
+  // real addresses scored against the real NOAA record.
   await db()`
     INSERT INTO service_areas (account_id, name, county_fips, state)
-    SELECT ${account.id}, 'Harrison County, TX (Demo)', '48203', 'TX'
+    SELECT ${account.id}, 'Harrison County, TX', '48203', 'TX'
     WHERE NOT EXISTS (SELECT 1 FROM service_areas WHERE account_id = ${account.id})
   `;
 
