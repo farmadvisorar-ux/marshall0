@@ -165,6 +165,199 @@ export async function getLead(accountId: string, parcelId: string): Promise<Lead
   return rows[0] ?? null;
 }
 
+export type CountyRow = {
+  fips: string;
+  state: string;
+  name: string;
+  lat: number | null;
+  lon: number | null;
+};
+
+/** Type-ahead over all 3,235 county-equivalents. Matches name, state or FIPS. */
+export async function searchCounties(q: string, limit = 25): Promise<CountyRow[]> {
+  const term = `%${q}%`;
+  return (await db()`
+    SELECT fips, state, name, lat, lon
+    FROM counties
+    WHERE name ILIKE ${term} OR state = UPPER(${q}) OR fips = ${q}
+    ORDER BY state, name
+    LIMIT ${limit}
+  `) as CountyRow[];
+}
+
+export async function addServiceArea(
+  accountId: string,
+  fips: string
+): Promise<ServiceArea | null> {
+  const county = (await db()`
+    SELECT fips, state, name FROM counties WHERE fips = ${fips}
+  `) as { fips: string; state: string; name: string }[];
+  if (!county[0]) return null;
+
+  const label = `${county[0].name}, ${county[0].state}`;
+  const rows = (await db()`
+    INSERT INTO service_areas (account_id, name, county_fips, state)
+    SELECT ${accountId}, ${label}, ${county[0].fips}, ${county[0].state}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM service_areas WHERE account_id = ${accountId} AND county_fips = ${county[0].fips}
+    )
+    RETURNING id, name, county_fips, state
+  `) as ServiceArea[];
+
+  // Already held: return the existing row rather than a duplicate.
+  if (!rows[0]) {
+    const existing = (await db()`
+      SELECT id, name, county_fips, state FROM service_areas
+      WHERE account_id = ${accountId} AND county_fips = ${fips}
+    `) as ServiceArea[];
+    return existing[0] ?? null;
+  }
+  return rows[0];
+}
+
+export async function removeServiceArea(accountId: string, id: string): Promise<void> {
+  await db()`DELETE FROM service_areas WHERE id = ${id} AND account_id = ${accountId}`;
+}
+
+export type StormProfile = {
+  hail_events: number;
+  hail_recent: number;
+  max_hail_in: number | null;
+  last_hail: string | null;
+  wind_events: number;
+  tornado_events: number;
+  fema_declarations: number;
+};
+
+/**
+ * What the national storm record says about one county. This is the scoring
+ * substrate for territories where no parcel source is wired yet — it is real
+ * measured history rather than an estimate, so it can be shown as fact.
+ */
+export async function countyStormProfile(fips: string): Promise<StormProfile> {
+  const rows = (await db()`
+    SELECT
+      COUNT(*) FILTER (WHERE event_type = 'Hail')::int AS hail_events,
+      COUNT(*) FILTER (WHERE event_type = 'Hail' AND begin_date >= CURRENT_DATE - INTERVAL '3 years')::int AS hail_recent,
+      MAX(magnitude) FILTER (WHERE event_type = 'Hail') AS max_hail_in,
+      MAX(begin_date) FILTER (WHERE event_type = 'Hail') AS last_hail,
+      COUNT(*) FILTER (WHERE event_type LIKE '%Wind%')::int AS wind_events,
+      COUNT(*) FILTER (WHERE event_type = 'Tornado')::int AS tornado_events,
+      (SELECT COUNT(*)::int FROM fema_declarations f WHERE f.county_fips = ${fips}) AS fema_declarations
+    FROM storm_events
+    WHERE county_fips = ${fips}
+  `) as StormProfile[];
+  return rows[0];
+}
+
+export type ParcelRow = {
+  id: string;
+  parcel_no: string | null;
+  owner_name: string | null;
+  site_address: string | null;
+  site_city: string | null;
+  site_state: string | null;
+  site_zip: string | null;
+  absentee_owner: boolean | null;
+  year_built: number | null;
+  parcel_value: string | null;
+  lat: number | null;
+  lon: number | null;
+};
+
+export async function countyParcelCount(fips: string): Promise<number> {
+  const rows = (await db()`
+    SELECT COUNT(*)::int AS count FROM parcels WHERE county_fips = ${fips}
+  `) as { count: number }[];
+  return rows[0]?.count ?? 0;
+}
+
+/**
+ * Candidate properties in a county, oldest roofs first.
+ *
+ * Age is the one property signal that is knowable from public record and
+ * genuinely predicts replacement, so it orders the list where no richer signal
+ * exists yet.
+ */
+export async function candidateParcels(
+  fips: string,
+  opts: { builtBefore?: number; limit?: number } = {}
+): Promise<ParcelRow[]> {
+  const builtBefore = opts.builtBefore ?? new Date().getFullYear() - 12;
+  const limit = opts.limit ?? 200;
+  return (await db()`
+    SELECT id, parcel_no, owner_name, site_address, site_city, site_state, site_zip,
+           absentee_owner, year_built, parcel_value, lat, lon
+    FROM parcels
+    WHERE county_fips = ${fips}
+      AND year_built IS NOT NULL
+      AND year_built BETWEEN 1900 AND ${builtBefore}
+      AND site_address IS NOT NULL
+    ORDER BY year_built ASC
+    LIMIT ${limit}
+  `) as ParcelRow[];
+}
+
+export type ScoredCandidate = ParcelRow & {
+  hail_3y: number;
+  hail_max_in: number | null;
+  hail_last: string | null;
+  wind_3y: number;
+};
+
+/**
+ * Candidate parcels with their measured storm exposure, in one round trip.
+ *
+ * Exposure is counted inside a bounding box rather than a true radius: the box
+ * is derived from the parcel's own latitude so it stays ~3km on both axes
+ * instead of collapsing toward the poles. NOAA reports a storm as a point, and
+ * hail swaths are wider than the reporting precision, so a box of this size is
+ * already inside the error bars of the source — a haversine refinement would be
+ * false precision, and it would cost the index scan.
+ */
+export async function scoredCandidates(
+  fips: string,
+  opts: { builtBefore?: number; limit?: number } = {}
+): Promise<ScoredCandidate[]> {
+  const builtBefore = opts.builtBefore ?? new Date().getFullYear() - 12;
+  const limit = opts.limit ?? 250;
+  const KM = 3;
+  const DEG_LAT = KM / 111.0;
+
+  return (await db()`
+    WITH candidates AS (
+      SELECT id, parcel_no, owner_name, site_address, site_city, site_state, site_zip,
+             absentee_owner, year_built, parcel_value, lat, lon
+      FROM parcels
+      WHERE county_fips = ${fips}
+        AND year_built BETWEEN 1900 AND ${builtBefore}
+        AND site_address IS NOT NULL
+        AND lat IS NOT NULL
+      ORDER BY year_built ASC
+      LIMIT ${limit}
+    )
+    SELECT c.*,
+      COALESCE(s.hail_3y, 0)::int  AS hail_3y,
+      s.hail_max_in,
+      s.hail_last,
+      COALESCE(s.wind_3y, 0)::int  AS wind_3y
+    FROM candidates c
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*) FILTER (WHERE e.event_type = 'Hail')::int AS hail_3y,
+        MAX(e.magnitude) FILTER (WHERE e.event_type = 'Hail') AS hail_max_in,
+        MAX(e.begin_date) FILTER (WHERE e.event_type = 'Hail') AS hail_last,
+        COUNT(*) FILTER (WHERE e.event_type LIKE '%Wind%')::int AS wind_3y
+      FROM storm_events e
+      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+        AND e.lat BETWEEN c.lat - ${DEG_LAT} AND c.lat + ${DEG_LAT}
+        AND e.lon BETWEEN c.lon - (${DEG_LAT} / GREATEST(COS(RADIANS(c.lat)), 0.01))
+                      AND c.lon + (${DEG_LAT} / GREATEST(COS(RADIANS(c.lat)), 0.01))
+    ) s ON TRUE
+    ORDER BY COALESCE(s.hail_3y, 0) DESC, c.year_built ASC
+  `) as ScoredCandidate[];
+}
+
 export type LeadInput = {
   parcelId: string;
   address: string;
