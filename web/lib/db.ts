@@ -330,10 +330,22 @@ export async function scoredCandidates(
              absentee_owner, year_built, parcel_value, lat, lon
       FROM parcels
       WHERE county_fips = ${fips}
-        AND year_built BETWEEN 1900 AND ${builtBefore}
         AND site_address IS NOT NULL
+        AND site_address !~ '^0 '
         AND lat IS NOT NULL
-      ORDER BY year_built ASC
+        -- A university, a hospital or a Kroger scores well on hail and is still
+        -- not a residential roofing job.
+        AND owner_is_org IS NOT TRUE
+        -- Not every roll publishes year built — Marshall TX does not. Requiring
+        -- it would return nothing at all for those counties, so an unknown age
+        -- is carried through and the engine reports the lower confidence.
+        AND (year_built IS NULL OR year_built BETWEEN 1900 AND ${builtBefore})
+        -- Bare land has no roof; a campus is not a house. Value and lot size
+        -- stand in for the land-use code these rolls do not all publish.
+        AND (improvement_value IS NULL OR improvement_value >= 10000)
+        AND (acres IS NULL OR acres < 5)
+        AND (parcel_value IS NULL OR parcel_value < 2000000)
+      ORDER BY year_built ASC NULLS LAST
       LIMIT ${limit}
     )
     SELECT c.*,

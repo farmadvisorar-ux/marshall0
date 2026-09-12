@@ -5,65 +5,124 @@
  * ArcGIS feature service. That is a real, free, licensable source of the one
  * thing NOAA cannot give us: an address and the name of the person who owns it.
  *
- *   DATABASE_URL=... node scripts/ingest-parcels-arcgis.mjs nc <countyName> [maxRows]
+ * Every source below needed its own reading of the schema. Field names repeat
+ * across counties but their meaning does not, so each mapping is written from
+ * inspecting live records rather than assumed from the column name.
+ *
+ *   DATABASE_URL=... node scripts/ingest-parcels-arcgis.mjs <source> [county] [maxRows]
  */
 import { neon } from '@neondatabase/serverless';
+import { looksLikeOrganization, isAbsenteeOwner } from '../src/owner-type.ts';
+
+const str = (v) => (v ?? '').toString().trim();
+const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+const join = (...parts) => parts.map(str).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 
 const SOURCES = {
-  // NC OneMap publishes all 100 counties as a single statewide point layer.
-  nc: {
-    id: 'nc-onemap',
+  // NC OneMap publishes all 100 counties as one statewide point layer.
+  'nc-onemap': {
+    label: 'NC OneMap statewide parcels',
+    state: 'NC',
     url: 'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/MapServer/0/query',
-    countyField: 'cntyname',
-    fipsField: 'stcntyfips',
     orderBy: 'objectid',
-    fields: {
-      parcel_no: 'parno', owner_name: 'ownname', owner_name2: 'ownname2',
-      site_address: 'siteadd', site_city: 'scity', site_state: 'sstate', site_zip: 'szip',
-      mail_address: 'mailadd', mail_city: 'mcity',
-      year_built: 'structyear', parcel_value: 'parval', improvement_value: 'improvval',
-      land_use: 'parusedesc', acres: 'gisacres',
-    },
-    // Counties populate the schema inconsistently: Wake fills the combined
-    // siteadd, Guilford leaves it empty and fills only the components. Dropping
-    // rows without siteadd would silently discard 187,000 real Guilford
-    // properties, so the address is composed when the combined field is blank.
-    // The street name lives in saddstr. saddstname is empty in several counties
-    // including Guilford, and 'stname' holds the STATE despite its name, so
-    // composing from those alone yields "1526 ST" with no street at all.
-    addressParts: ['saddno', 'saddpref', 'saddstr', 'saddstname', 'saddsttyp', 'saddstsuf'],
+    geometry: 'point',
+    requiresCounty: true,
+    countyClause: (county) => `cntyname='${county}' AND structyear>1900`,
+    outFields: [
+      'objectid', 'stcntyfips', 'parno', 'ownname', 'ownname2', 'siteadd', 'scity', 'sstate',
+      'szip', 'mailadd', 'mcity', 'structyear', 'parval', 'improvval', 'parusedesc', 'gisacres',
+      'saddno', 'saddpref', 'saddstr', 'saddstname', 'saddsttyp', 'saddstsuf',
+    ],
+    map: (a) => ({
+      key: a.objectid,
+      county_fips: a.stcntyfips,
+      parcel_no: a.parno,
+      owner_name: a.ownname,
+      owner_name2: a.ownname2,
+      // Wake fills the combined siteadd; Guilford leaves it empty and fills only
+      // components. The street name is in saddstr — saddstname is empty in
+      // several counties, and 'stname' holds the STATE despite its name.
+      site_address: str(a.siteadd) || join(a.saddno, a.saddpref, a.saddstr || a.saddstname, a.saddsttyp, a.saddstsuf),
+      site_city: a.scity,
+      site_state: a.sstate,
+      site_zip: a.szip,
+      mail_address: a.mailadd,
+      mail_city: a.mcity,
+      year_built: num(a.structyear),
+      parcel_value: num(a.parval),
+      improvement_value: num(a.improvval),
+      land_use: a.parusedesc,
+      acres: num(a.gisacres),
+    }),
+  },
+
+  // Harrison County TX has no county-wide open roll; the City of Marshall
+  // publishes its own. The layer carries no FIPS and no year built.
+  'marshall-tx': {
+    label: 'City of Marshall TX parcels',
+    state: 'TX',
+    url: 'https://services6.arcgis.com/deHuGpt8nOXApIC6/arcgis/rest/services/City_of_Marshall_TX_Parcels_2026/FeatureServer/0/query',
+    orderBy: 'OBJECTID',
+    geometry: 'centroid',
+    fixedFips: '48203',
+    requiresCounty: false,
+    // imprv_val of zero is bare land. A parcel with no structure has no roof,
+    // and shipping it as a roofing lead wastes a door knock.
+    countyClause: () => "situs_street IS NOT NULL AND file_as_name IS NOT NULL AND imprv_val > 0",
+    outFields: [
+      'OBJECTID', 'prop_id_text', 'file_as_name', 'situs_num', 'situs_street_prefx',
+      'situs_street', 'situs_city', 'situs_state', 'situs_zip', 'addr_line1', 'addr_city',
+      'market', 'imprv_val', 'legal_acreage',
+    ],
+    map: (a) => ({
+      key: a.OBJECTID,
+      parcel_no: a.prop_id_text,
+      owner_name: a.file_as_name,
+      owner_name2: null,
+      // situs_street_sufix is excluded deliberately: it holds a city
+      // abbreviation ("MAR"), not a street suffix, so including it produces
+      // "4426 JEFF DAVIS MAR" for a house on Jeff Davis St.
+      site_address: join(a.situs_num, a.situs_street_prefx, a.situs_street),
+      site_city: str(a.situs_city) || 'Marshall',
+      site_state: str(a.situs_state) || 'TX',
+      site_zip: a.situs_zip,
+      mail_address: a.addr_line1,
+      mail_city: a.addr_city,
+      year_built: null,
+      parcel_value: num(a.market),
+      improvement_value: num(a.imprv_val),
+      land_use: null,
+      acres: num(a.legal_acreage),
+    }),
   },
 };
 
 const COLS = ['id','county_fips','parcel_no','owner_name','owner_name2','site_address','site_city',
-  'site_state','site_zip','mail_address','mail_city','absentee_owner','year_built','parcel_value',
-  'improvement_value','land_use','acres','lat','lon','source'];
+  'site_state','site_zip','mail_address','mail_city','absentee_owner','owner_is_org','year_built',
+  'parcel_value','improvement_value','land_use','acres','lat','lon','source'];
 
 const sql = neon(process.env.DATABASE_URL);
-const [, , sourceKey, countyName, maxRowsArg] = process.argv;
+const [, , sourceKey, arg1, arg2] = process.argv;
 const src = SOURCES[sourceKey];
-if (!src || !countyName) {
-  console.error('usage: ingest-parcels-arcgis.mjs <' + Object.keys(SOURCES).join('|') + '> <county> [maxRows]');
+if (!src) {
+  console.error(`usage: ingest-parcels-arcgis.mjs <${Object.keys(SOURCES).join('|')}> [county] [maxRows]`);
   process.exit(1);
 }
-const maxRows = Number(maxRowsArg || 50000);
+const county = src.requiresCounty ? arg1 : null;
+if (src.requiresCounty && !county) {
+  console.error(`${sourceKey} requires a county name`);
+  process.exit(1);
+}
+const maxRows = Number((src.requiresCounty ? arg2 : arg1) || 50000);
 const PAGE = 1000;
-const outFields = [
-  src.orderBy, src.fipsField, ...Object.values(src.fields), ...(src.addressParts ?? []),
-].join(',');
 
-const composeAddress = (a) => {
-  const street = (a.saddstr || a.saddstname || '').toString().trim();
-  if (!street) return '';
-  return [a.saddno, a.saddpref, street, a.saddsttyp, a.saddstsuf]
-    .map((v) => (v ?? '').toString().trim())
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-};
-
-async function flush(batch) {
-  if (!batch.length) return 0;
+async function flush(rows) {
+  if (!rows.length) return 0;
+  // Postgres refuses an ON CONFLICT that touches the same row twice in one
+  // statement, and a multi-polygon parcel arrives as several features sharing
+  // one parcel number. Collapsing them here is the same de-duplication the
+  // customer needs anyway: one roof, one lead.
+  const batch = [...new Map(rows.map((r) => [r[0], r])).values()];
   const ph = batch
     .map((_, i) => '(' + COLS.map((__, j) => `$${i * COLS.length + j + 1}`).join(',') + ')')
     .join(',');
@@ -71,29 +130,31 @@ async function flush(batch) {
     `INSERT INTO parcels (${COLS.join(',')}) VALUES ${ph}
      ON CONFLICT (id) DO UPDATE SET
        owner_name = excluded.owner_name, site_address = excluded.site_address,
+       site_city = excluded.site_city, site_zip = excluded.site_zip,
+       mail_address = excluded.mail_address, absentee_owner = excluded.absentee_owner,
+       owner_is_org = excluded.owner_is_org,
        year_built = excluded.year_built, parcel_value = excluded.parcel_value,
-       absentee_owner = excluded.absentee_owner, updated_at = NOW()`,
+       improvement_value = excluded.improvement_value,
+       lat = excluded.lat, lon = excluded.lon, updated_at = NOW()`,
     batch.flat()
   );
   return batch.length;
 }
 
-const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-// Punctuation is not consistent between the situs and mailing records — the
-// same house appears as OROURKE DR on one and O'ROURKE DR on the other. Comparing
-// raw strings marks those owners absentee, which suppresses the heaviest
-// property signal on exactly the homeowners most likely to answer the door.
-const norm = (s) =>
-  (s ?? '').toString().toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
-
-let offset = 0, loaded = 0, batch = [];
+let offset = 0, loaded = 0, skipped = 0, batch = [];
 while (loaded < maxRows) {
   const params = new URLSearchParams({
-    // Only structures worth roofing, and only ones old enough to be a lead.
-    where: `${src.countyField}='${countyName}' AND structyear>1900`,
-    outFields, orderByFields: src.orderBy, resultOffset: String(offset),
-    resultRecordCount: String(PAGE), returnGeometry: 'true', outSR: '4326', f: 'json',
+    where: src.countyClause(county),
+    outFields: src.outFields.join(','),
+    orderByFields: src.orderBy,
+    resultOffset: String(offset),
+    resultRecordCount: String(PAGE),
+    returnGeometry: src.geometry === 'point' ? 'true' : 'false',
+    outSR: '4326',
+    f: 'json',
   });
+  if (src.geometry === 'centroid') params.set('returnCentroid', 'true');
+
   const res = await fetch(`${src.url}?${params}`);
   if (!res.ok) { console.error('http', res.status); break; }
   const data = await res.json();
@@ -102,22 +163,25 @@ while (loaded < maxRows) {
   if (!feats.length) break;
 
   for (const f of feats) {
-    const a = f.attributes, g = f.geometry ?? {};
-    const fips = a[src.fipsField];
-    const site = (a[src.fields.site_address] || '').trim() || composeAddress(a);
-    if (!fips || !site) continue;
-    const mail = a[src.fields.mail_address];
+    const a = f.attributes;
+    const m = src.map(a);
+    const fips = src.fixedFips ?? m.county_fips;
+    const geom = src.geometry === 'centroid' ? f.centroid : f.geometry;
+    if (!fips || !m.site_address) { skipped++; continue; }
+
+    // Keyed on the assessor's parcel number, not the feature id. Marshall
+    // splits a multi-polygon parcel into one feature per ring, so keying on
+    // OBJECTID shipped 305 Henley Perry three times — the same roof, three
+    // times against the customer's quota.
+    const identity = str(m.parcel_no) || String(m.key);
+
     batch.push([
-      `${src.id}:${fips}:${a[src.orderBy]}`, fips,
-      a[src.fields.parcel_no], a[src.fields.owner_name], a[src.fields.owner_name2],
-      site, a[src.fields.site_city], a[src.fields.site_state], a[src.fields.site_zip],
-      mail, a[src.fields.mail_city],
-      // The assessor's own tell: bills posted elsewhere means nobody who can say
-      // yes answers this door.
-      mail ? norm(mail) !== norm(site) : null,
-      num(a[src.fields.year_built]), num(a[src.fields.parcel_value]),
-      num(a[src.fields.improvement_value]), a[src.fields.land_use], num(a[src.fields.acres]),
-      num(g.y), num(g.x), src.id,
+      `${sourceKey}:${fips}:${identity}`, fips, m.parcel_no, m.owner_name, m.owner_name2,
+      m.site_address, m.site_city, m.site_state, m.site_zip, m.mail_address, m.mail_city,
+      isAbsenteeOwner(m.site_address, m.mail_address),
+      looksLikeOrganization(m.owner_name),
+      m.year_built, m.parcel_value, m.improvement_value, m.land_use, m.acres,
+      num(geom?.y), num(geom?.x), sourceKey,
     ]);
     if (batch.length >= 500) { loaded += await flush(batch); batch = []; }
   }
@@ -129,8 +193,9 @@ loaded += await flush(batch);
 
 await sql`
   INSERT INTO parcel_sources (id, name, state, url, field_map, counties, last_run_at, last_run_rows)
-  VALUES (${src.id}, ${'NC OneMap statewide parcels'}, ${'NC'}, ${src.url},
-          ${JSON.stringify(src.fields)}::jsonb, ${countyName}, NOW(), ${loaded})
-  ON CONFLICT (id) DO UPDATE SET last_run_at = NOW(), last_run_rows = ${loaded}, counties = ${countyName}
+  VALUES (${sourceKey}, ${src.label}, ${src.state}, ${src.url},
+          ${JSON.stringify(src.outFields)}::jsonb, ${county ?? src.fixedFips ?? null}, NOW(), ${loaded})
+  ON CONFLICT (id) DO UPDATE SET last_run_at = NOW(), last_run_rows = ${loaded},
+    counties = ${county ?? src.fixedFips ?? null}
 `;
-console.log(`${countyName}: ${loaded.toLocaleString()} parcels loaded`);
+console.log(`${src.label}${county ? ` (${county})` : ''}: ${loaded.toLocaleString()} loaded, ${skipped.toLocaleString()} skipped`);

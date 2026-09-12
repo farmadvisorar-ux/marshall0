@@ -1,5 +1,7 @@
 import sourcesData from '../data/sources.json';
 
+export { looksLikeOrganization } from './owner-type';
+
 /**
  * Identity resolution and spiderweb expansion.
  *
@@ -159,6 +161,7 @@ export function normAddress(address?: string, postal?: string): NormalisedAddres
 }
 
 const ORG_NOISE = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|ltd|limited|lp|llp|pllc|dba|the|and|&)\b/g;
+
 
 export function normName(input?: string): string | undefined {
   if (!input) return undefined;
