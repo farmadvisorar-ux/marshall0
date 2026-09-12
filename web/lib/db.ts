@@ -651,3 +651,35 @@ export async function upsertLead(
       updated_at = NOW()
   `;
 }
+
+export type MappableArea = {
+  id: string;
+  name: string;
+  fips: string;
+  lat: number;
+  lon: number;
+  parcels: number;
+};
+
+/**
+ * The account's service areas as points a map can open on.
+ *
+ * A county with no parcels loaded is dropped rather than shown empty: the map
+ * would centre on it and render nothing, which reads as a broken map instead
+ * of an unloaded county. The search page is where a county gets loaded.
+ */
+export async function mappableAreas(accountId: string): Promise<MappableArea[]> {
+  return (await db()`
+    SELECT s.id, s.name, c.fips, c.lat, c.lon, p.count AS parcels
+    FROM service_areas s
+    JOIN counties c ON c.fips = s.county_fips
+    CROSS JOIN LATERAL (
+      SELECT COUNT(*)::int AS count FROM parcels WHERE county_fips = c.fips
+    ) p
+    WHERE s.account_id = ${accountId}
+      AND c.lat IS NOT NULL
+      AND c.lon IS NOT NULL
+      AND p.count > 0
+    ORDER BY p.count DESC, s.name
+  `) as MappableArea[];
+}

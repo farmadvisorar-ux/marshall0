@@ -16,6 +16,12 @@ export function AppNav() {
             Find Leads
           </Link>
           <Link
+            href="/map"
+            className="text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+          >
+            Storm Map
+          </Link>
+          <Link
             href="/leads"
             className="text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
           >
