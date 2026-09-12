@@ -329,6 +329,136 @@ export async function countyStormProfile(fips: string): Promise<StormProfile> {
   return rows[0];
 }
 
+export type StormImpact = {
+  event_id: string;
+  event_type: string;
+  state: string | null;
+  county_fips: string | null;
+  cz_name: string | null;
+  begin_date: string;
+  magnitude: string | null;
+  lat: number;
+  lon: number;
+  distance_km: number;
+};
+
+/**
+ * Storm events within a true radius of a point.
+ *
+ * Unlike the per-parcel scoring path, which uses a bounding box because it runs
+ * against thousands of candidates at once, this refines to real great-circle
+ * distance. The result set is small and the number is shown to a customer —
+ * "1.8km away" has to survive being checked against a map.
+ *
+ * The box is still applied first so the query uses the lat/lon index instead of
+ * computing a haversine across 319,576 rows.
+ */
+export async function stormsNearPoint(
+  lat: number,
+  lon: number,
+  radiusKm: number,
+  opts: { sinceYears?: number; limit?: number } = {}
+): Promise<StormImpact[]> {
+  const sinceYears = opts.sinceYears ?? 3;
+  const limit = opts.limit ?? 200;
+  const degLat = radiusKm / 111.0;
+  const degLon = radiusKm / Math.max(111.0 * Math.cos((lat * Math.PI) / 180), 1);
+
+  return (await db()`
+    SELECT event_id::text, event_type, state, county_fips, cz_name,
+           begin_date, magnitude, lat, lon,
+           ROUND((6371 * ACOS(LEAST(1, GREATEST(-1,
+             COS(RADIANS(${lat})) * COS(RADIANS(lat)) * COS(RADIANS(lon) - RADIANS(${lon}))
+             + SIN(RADIANS(${lat})) * SIN(RADIANS(lat))
+           ))))::numeric, 2) AS distance_km
+    FROM storm_events
+    WHERE lat BETWEEN ${lat - degLat} AND ${lat + degLat}
+      AND lon BETWEEN ${lon - degLon} AND ${lon + degLon}
+      AND begin_date >= (CURRENT_DATE - (${sinceYears} || ' years')::interval)
+      AND 6371 * ACOS(LEAST(1, GREATEST(-1,
+            COS(RADIANS(${lat})) * COS(RADIANS(lat)) * COS(RADIANS(lon) - RADIANS(${lon}))
+            + SIN(RADIANS(${lat})) * SIN(RADIANS(lat))
+          ))) <= ${radiusKm}
+    ORDER BY begin_date DESC
+    LIMIT ${limit}
+  `) as StormImpact[];
+}
+
+export type NearbyParcel = {
+  id: string;
+  parcel_no: string | null;
+  owner_name: string | null;
+  site_address: string | null;
+  site_city: string | null;
+  site_state: string | null;
+  site_zip: string | null;
+  county_fips: string;
+  absentee_owner: boolean | null;
+  year_built: number | null;
+  parcel_value: string | null;
+  lat: number;
+  lon: number;
+  distance_km: number;
+  hail_3y: number;
+  hail_max_in: string | null;
+  hail_last: string | null;
+  wind_3y: number;
+};
+
+/**
+ * Properties within a radius of a point, carrying their own storm exposure.
+ *
+ * Exposure is measured around each parcel rather than around the search point:
+ * a house at the edge of a 10km search may have taken hail the centre never
+ * saw, and averaging over the radius would erase exactly the variation a
+ * contractor is looking for.
+ */
+export async function parcelsNearPoint(
+  lat: number,
+  lon: number,
+  radiusKm: number,
+  opts: { limit?: number } = {}
+): Promise<NearbyParcel[]> {
+  const limit = opts.limit ?? 200;
+  const degLat = radiusKm / 111.0;
+  const degLon = radiusKm / Math.max(111.0 * Math.cos((lat * Math.PI) / 180), 1);
+  const EXPOSURE_DEG = 3 / 111.0;
+
+  return (await db()`
+    WITH near AS (
+      SELECT id, parcel_no, owner_name, site_address, site_city, site_state, site_zip,
+             county_fips, absentee_owner, year_built, parcel_value, lat, lon,
+             ROUND((6371 * ACOS(LEAST(1, GREATEST(-1,
+               COS(RADIANS(${lat})) * COS(RADIANS(lat)) * COS(RADIANS(lon) - RADIANS(${lon}))
+               + SIN(RADIANS(${lat})) * SIN(RADIANS(lat))
+             ))))::numeric, 2) AS distance_km
+      FROM parcels
+      WHERE lat BETWEEN ${lat - degLat} AND ${lat + degLat}
+        AND lon BETWEEN ${lon - degLon} AND ${lon + degLon}
+        AND owner_is_org IS NOT TRUE
+        AND site_address IS NOT NULL
+      LIMIT 2000
+    )
+    SELECT n.*, COALESCE(s.hail_3y, 0)::int AS hail_3y, s.hail_max_in, s.hail_last,
+           COALESCE(s.wind_3y, 0)::int AS wind_3y
+    FROM near n
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*) FILTER (WHERE e.event_type = 'Hail')::int AS hail_3y,
+             MAX(e.magnitude) FILTER (WHERE e.event_type = 'Hail') AS hail_max_in,
+             MAX(e.begin_date) FILTER (WHERE e.event_type = 'Hail') AS hail_last,
+             COUNT(*) FILTER (WHERE e.event_type LIKE '%Wind%')::int AS wind_3y
+      FROM storm_events e
+      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+        AND e.lat BETWEEN n.lat - ${EXPOSURE_DEG} AND n.lat + ${EXPOSURE_DEG}
+        AND e.lon BETWEEN n.lon - (${EXPOSURE_DEG} / GREATEST(COS(RADIANS(n.lat)), 0.01))
+                      AND n.lon + (${EXPOSURE_DEG} / GREATEST(COS(RADIANS(n.lat)), 0.01))
+    ) s ON TRUE
+    WHERE n.distance_km <= ${radiusKm}
+    ORDER BY COALESCE(s.hail_3y, 0) DESC, n.distance_km ASC
+    LIMIT ${limit}
+  `) as NearbyParcel[];
+}
+
 export type ParcelRow = {
   id: string;
   parcel_no: string | null;
@@ -447,6 +577,30 @@ export async function scoredCandidates(
     ) s ON TRUE
     ORDER BY COALESCE(s.hail_3y, 0) DESC, c.year_built ASC
   `) as ScoredCandidate[];
+}
+
+export const LEAD_STATUSES = ['available', 'contacted', 'won', 'lost', 'discarded'] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+/**
+ * Move a lead through the pipeline.
+ *
+ * Scoped by account, not just lead id: without that, knowing a parcel number
+ * would be enough to alter another contractor's pipeline. Returns null when
+ * nothing matched, so the caller reports "not found" rather than a silent
+ * success on someone else's row.
+ */
+export async function updateLeadStatus(
+  accountId: string,
+  parcelId: string,
+  status: LeadStatus
+): Promise<Lead | null> {
+  const rows = (await db()`
+    UPDATE leads SET status = ${status}, updated_at = NOW()
+    WHERE account_id = ${accountId} AND parcel_id = ${parcelId}
+    RETURNING *
+  `) as Lead[];
+  return rows[0] ?? null;
 }
 
 export type LeadInput = {

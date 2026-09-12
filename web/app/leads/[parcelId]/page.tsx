@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { AppNav } from '../../components/AppNav';
+import { LeadStatusActions } from '../../components/LeadStatusActions';
 import { requireAccount } from '@/lib/session';
 import { getLead } from '@/lib/db';
 
@@ -99,6 +100,11 @@ export default async function LeadDetailPage({ params }: { params: { parcelId: s
               </div>
             </Card>
           )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 border border-slate-200 dark:border-slate-700 mb-8">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">Pipeline</h2>
+          <LeadStatusActions parcelId={lead.parcel_id} current={lead.status} />
         </div>
 
         <div className="grid md:grid-cols-2 gap-8">
