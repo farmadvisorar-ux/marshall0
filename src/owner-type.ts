@@ -44,6 +44,47 @@ export function looksLikeOrganization(owner?: string | null): boolean {
   return ORG_MARKER.test(cleaned) || ORG_ACRONYM.test(cleaned.toUpperCase());
 }
 
+/**
+ * Street types and directionals, mapped to one spelling.
+ *
+ * Two systems write the same address two ways and neither is wrong. Wisconsin
+ * records the property as "116 PUTNAM STREET" and mails the bill to "116
+ * PUTNAM ST"; Marshall records "4426 JEFF DAVIS" and mails to "4426 JEFF DAVIS
+ * ST MARSHALL". Compared literally these are three different houses, and the
+ * owner living in the first one gets filed as an absentee landlord.
+ */
+const CANONICAL: Record<string, string> = {
+  STREET: 'ST', STR: 'ST', ST: 'ST',
+  AVENUE: 'AVE', AVEN: 'AVE', AV: 'AVE', AVE: 'AVE',
+  ROAD: 'RD', RD: 'RD',
+  DRIVE: 'DR', DRV: 'DR', DR: 'DR',
+  LANE: 'LN', LN: 'LN',
+  COURT: 'CT', CT: 'CT',
+  CIRCLE: 'CIR', CIR: 'CIR',
+  BOULEVARD: 'BLVD', BLVD: 'BLVD',
+  PLACE: 'PL', PL: 'PL',
+  TERRACE: 'TER', TERR: 'TER', TER: 'TER',
+  TRAIL: 'TRL', TRL: 'TRL',
+  PARKWAY: 'PKWY', PKWY: 'PKWY',
+  HIGHWAY: 'HWY', HWY: 'HWY',
+  SQUARE: 'SQ', SQ: 'SQ',
+  PLAZA: 'PLZ', PLZ: 'PLZ',
+  POINT: 'PT', PT: 'PT',
+  RIDGE: 'RDG', RDG: 'RDG',
+  CROSSING: 'XING', XING: 'XING',
+  HEIGHTS: 'HTS', HTS: 'HTS',
+  EXTENSION: 'EXT', EXT: 'EXT',
+  NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
+  NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
+};
+
+/** The canonical values that name a street type, as opposed to a directional. */
+const STREET_TYPES = new Set([
+  'ST', 'AVE', 'RD', 'DR', 'LN', 'CT', 'CIR', 'BLVD', 'PL', 'TER', 'TRL',
+  'PKWY', 'HWY', 'SQ', 'PLZ', 'PT', 'RDG', 'XING', 'HTS', 'EXT',
+  'WAY', 'LOOP', 'RUN', 'PATH', 'PIKE', 'BEND', 'COVE', 'PASS', 'WALK',
+]);
+
 // Apostrophes are removed rather than treated as separators. Splitting on them
 // turns O'ROURKE into two tokens that can never match the OROURKE the other
 // record spells without punctuation, which is the very mismatch this is for.
@@ -54,7 +95,8 @@ const tokens = (s: string): string[] =>
     .replace(/[^A-Z0-9]+/g, ' ')
     .trim()
     .split(' ')
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((t) => CANONICAL[t] ?? t);
 
 /**
  * Whether the tax bill goes somewhere other than the property.
@@ -71,6 +113,13 @@ const tokens = (s: string): string[] =>
  * the mailing address, the bill is going to the house. Extra tokens on the
  * mailing side are street type, city and state, not a different building.
  *
+ * One token is allowed to be missing rather than matched: a street type the
+ * other system did not record at all. Marshall writes the property as "4426
+ * JEFF DAVIS" with no type and mails to "...DAVIS ST", so the type has to be
+ * droppable in either direction. It is only forgiven when the other side names
+ * no street type whatsoever — a mailing address that says AVE where the
+ * property says ST is a different street, not a different abbreviation.
+ *
  * Returns null when there is no mailing address to compare, so a missing value
  * is scored as unknown rather than silently as owner-occupied.
  */
@@ -80,7 +129,16 @@ export function isAbsenteeOwner(
 ): boolean | null {
   if (!siteAddress || !mailAddress) return null;
   const site = tokens(siteAddress);
-  const mail = new Set(tokens(mailAddress));
+  const mail = tokens(mailAddress);
   if (!site.length) return null;
-  return !site.every((t) => mail.has(t));
+
+  const mailSet = new Set(mail);
+  const mailNamesAType = mail.some((t) => STREET_TYPES.has(t));
+
+  for (const token of site) {
+    if (mailSet.has(token)) continue;
+    if (STREET_TYPES.has(token) && !mailNamesAType) continue;
+    return true;
+  }
+  return false;
 }

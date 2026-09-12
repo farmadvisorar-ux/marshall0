@@ -49,6 +49,29 @@ const OCCUPANCY = [
   ['1800 ELM ST N', '10319 WESTLAKE DR UNIT 175', true],
   // No mailing address is unknown, not owner-occupied.
   ['200 MACY ST', null, null],
+
+  // Wisconsin writes the property with the street type spelled out and mails
+  // to the abbreviation — the same defect as Marshall's, with the sides
+  // reversed. Left unhandled this marks essentially every owner-occupied
+  // house in the state as an absentee landlord.
+  ['116 PUTNAM STREET', '116 PUTNAM ST, EAU CLAIRE, WI  54703', false],
+  ['664 GALLOWAY STREET', '664 GALLOWAY ST, EAU CLAIRE, WI  54703', false],
+  ['658 GALLOWAY STREET', '658 GALLOWAY ST, EAU CLAIRE, WI  54703', false],
+  ['656 GALLOWAY STREET', '4019 CLAY ST, EAU CLAIRE, WI  54701', true],
+  ['679 WISCONSIN STREET', '6574 NORTH SHORE DR, EAU CLAIRE, WI  54703', true],
+
+  // Other expansions of the same kind, both directions.
+  ['1200 COUNTY ROAD B', '1200 COUNTY RD B, MADISON, WI', false],
+  ['77 ELM AVENUE', '77 ELM AVE', false],
+  ['5 LAKE DRIVE', '5 LAKE DR', false],
+  ['9 CEDAR LN', '9 CEDAR LANE', false],
+  ['412 NORTH MAIN ST', '412 N MAIN ST', false],
+  ['412 N MAIN ST', '412 NORTH MAIN STREET', false],
+
+  // A street type is only forgiven when the other side names none at all.
+  // Park Street and Park Avenue are two different streets.
+  ['100 PARK ST', '100 PARK AVE', true],
+  ['100 PARK ST', '100 PARK, SOMEWHERE, TX', false],
 ];
 
 for (const name of ORGANISATIONS) {
