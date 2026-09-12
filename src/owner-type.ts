@@ -20,7 +20,7 @@
  * large share of genuinely residential owners.
  */
 const ORG_MARKER =
-  /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|company|ltd|limited|lp|llp|pllc|plc|holdings?|partners(hip)?|ventures?|properties|realty|management|enterprises?|investments?|associates|group|university|college|school|isd|church|ministries|hospital|authority|district|county|city\s+of|town\s+of|state\s+of|department|bank|bancorp|credit\s+union|foundation|association|assoc|cemetery|lodge|club|commission|government|center|centre|services|systems|industries|manufacturing|mfg|motors|automotive|collision|insurance|agency|clinic|medical|dental|storage|apartments|estates|lodge|museum|library|airport|utility|electric|telephone|railroad|cad|usa|u\.s\.a|united\s+states)\b/i;
+  /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|ltd|limited|lp|llp|pllc|plc|holdings?|partners(hip)?|ventures?|properties|realty|management|enterprises?|investments?|associates|group|university|college|school|isd|church|ministries|hospital|authority|district|county|city\s+of|town\s+of|state\s+of|department|bank|bancorp|credit\s+union|foundation|association|assoc|cemetery|lodge|club|commission|government|center|centre|services|systems|industries|manufacturing|mfg|motors|automotive|collision|insurance|agency|clinic|medical|dental|storage|apartments|estates|lodge|museum|library|airport|utility|electric|telephone|railroad|cad|usa|u\.s\.a|united\s+states)\b/i;
 
 /**
  * True when an owner name reads as an organisation rather than a person.
@@ -30,13 +30,31 @@ const ORG_MARKER =
  * homeowner loses one lead silently; wrongly including a hospital wastes a
  * visit and makes the whole list look careless.
  */
+/**
+ * Appraisal districts and similar bodies appear as bare acronyms — HCAD,
+ * WCAD, MISD — where the marker is fused into one token and a word-boundary
+ * match cannot see it. These own real parcels and would otherwise sit at the
+ * top of a storm-ranked list.
+ */
+const ORG_ACRONYM = /\b[A-Z]{1,5}(CAD|ISD|MUD|EDC|HOA)\b/;
+
 export function looksLikeOrganization(owner?: string | null): boolean {
   if (!owner) return false;
-  return ORG_MARKER.test(owner.replace(/[.,]/g, ' '));
+  const cleaned = owner.replace(/[.,]/g, ' ');
+  return ORG_MARKER.test(cleaned) || ORG_ACRONYM.test(cleaned.toUpperCase());
 }
 
+// Apostrophes are removed rather than treated as separators. Splitting on them
+// turns O'ROURKE into two tokens that can never match the OROURKE the other
+// record spells without punctuation, which is the very mismatch this is for.
 const tokens = (s: string): string[] =>
-  s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  s
+    .toUpperCase()
+    .replace(/['’]/g, '')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
 
 /**
  * Whether the tax bill goes somewhere other than the property.
