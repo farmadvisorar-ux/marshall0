@@ -124,6 +124,8 @@ export async function POST(request: Request) {
         windEventsLast3y: p.wind_3y,
         propertyValue: p.parcel_value ? Number(p.parcel_value) : null,
         ownerOccupied: p.absentee_owner === null ? null : !p.absentee_owner,
+        monthsSinceHail: p.months_since_hail,
+        climateRoofStress: p.thermal_cycles == null ? null : Number(p.thermal_cycles),
       },
       contributions: Object.fromEntries(score.contributions.map((c) => [c.id, c.points])),
       storm: {
@@ -131,6 +133,8 @@ export async function POST(request: Request) {
         hailMaxInches: hailMax,
         lastHailDate: p.hail_last,
         windEventsLast3y: p.wind_3y,
+        monthsSinceHail: p.months_since_hail,
+        climateStressDays: p.thermal_cycles == null ? null : Number(p.thermal_cycles),
       },
       roof: { ageYears: roofAgeYears ?? null, yearBuilt: p.year_built },
       owner: {

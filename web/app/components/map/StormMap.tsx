@@ -24,6 +24,27 @@ function stormStyle(s: Storm): { radius: number; color: string } {
 const gradeColor = (g: string) =>
   g === 'A' ? '#15803d' : g === 'B' ? '#0369a1' : g === 'C' ? '#a16207' : '#64748b';
 
+/**
+ * The claim window, as a colour and a phrase.
+ *
+ * Green is not "recent" — it is "a carrier will still look at this". Three
+ * months and under is amber because the damage is fresh and so is every
+ * competitor's door knock.
+ */
+const claimWindowColor = (months: number) =>
+  months <= 3 ? '#b45309' : months <= 18 ? '#15803d' : months <= 24 ? '#b45309' : '#b91c1c';
+
+const claimWindowNote = (months: number) =>
+  months <= 3
+    ? 'fresh, and crowded'
+    : months <= 9
+      ? 'best window'
+      : months <= 18
+        ? 'still claimable'
+        : months <= 24
+          ? 'closing'
+          : 'likely too old to claim';
+
 function ClickHandler({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   useMapEvents({ click: (e) => onPick(e.latlng.lat, e.latlng.lng) });
   return null;
@@ -186,6 +207,15 @@ export function StormMap({
                 <br />
                 {p.hailEventsLast3y} hail event{p.hailEventsLast3y === 1 ? '' : 's'} in 3y
                 {p.hailMaxInches ? ` · largest ${p.hailMaxInches}"` : ''}
+                {p.monthsSinceHail != null && (
+                  <>
+                    <br />
+                    <span style={{ color: claimWindowColor(p.monthsSinceHail), fontWeight: 600 }}>
+                      last hail {p.monthsSinceHail} months ago
+                    </span>{' '}
+                    — {claimWindowNote(p.monthsSinceHail)}
+                  </>
+                )}
                 <br />
                 {p.ownerOccupied === null
                   ? 'Occupancy unknown'

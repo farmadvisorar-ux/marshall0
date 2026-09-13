@@ -118,6 +118,15 @@ export default async function LeadDetailPage({ params }: { params: { parcelId: s
                 {storm.lastHailDate && (
                   <Field label="Last hail event" value={formatDate(String(storm.lastHailDate))} />
                 )}
+                {storm.monthsSinceHail != null && (
+                  <ClaimWindowField months={Number(storm.monthsSinceHail)} />
+                )}
+                {storm.climateStressDays != null && (
+                  <Field
+                    label="Climate stress"
+                    value={`${Number(storm.climateStressDays)} freeze or 90°F days a year`}
+                  />
+                )}
                 {storm.hailEventsCountyWide != null && (
                   <Field
                     label="County-wide reports"
@@ -151,6 +160,34 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 border border-slate-200 dark:border-slate-700">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">{title}</h2>
       {children}
+    </div>
+  );
+}
+
+/**
+ * How a carrier is likely to treat a claim of this age.
+ *
+ * Colour-coded because it is the one number on the page that decides whether
+ * this visit happens this week. Worded as a tendency rather than a deadline:
+ * policies differ and a roofer is not the one who rules on a claim.
+ */
+function ClaimWindowField({ months }: { months: number }) {
+  const [tone, headline, detail] =
+    months <= 3
+      ? ['text-amber-700 dark:text-amber-400', `${months} months ago`, 'Fresh — expect competition on the street']
+      : months <= 9
+        ? ['text-emerald-700 dark:text-emerald-400', `${months} months ago`, 'Best window — adjusters have caught up']
+        : months <= 18
+          ? ['text-emerald-700 dark:text-emerald-400', `${months} months ago`, 'Still claimable']
+          : months <= 24
+            ? ['text-amber-700 dark:text-amber-400', `${months} months ago`, 'Closing — near the notice period in most policies']
+            : ['text-red-700 dark:text-red-400', `${months} months ago`, 'Stale — hard to tie damage to one dated storm'];
+
+  return (
+    <div>
+      <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Claim window</p>
+      <p className={`font-semibold ${tone}`}>{headline}</p>
+      <p className="text-sm text-slate-600 dark:text-slate-400">{detail}</p>
     </div>
   );
 }

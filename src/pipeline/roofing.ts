@@ -162,9 +162,23 @@ export function runRoofingPipeline(input: RoofingInput, options: RoofingOptions 
  * there is no storm to name, fall back to the permit record — also a fact,
  * also verifiable, and still not a judgement about their house.
  */
-export function buildHook(storm: StormProfile, roof: AgeEstimate): string | undefined {
+export function buildHook(
+  storm: StormProfile,
+  roof: AgeEstimate,
+  monthsSinceHail?: number | null
+): string | undefined {
   if (storm.hook) return storm.hook;
-  if (storm.hailEventsLast3y > 0 && storm.lastHailDate) return `hail on ${formatDay(storm.lastHailDate)}`;
+  if (storm.hailEventsLast3y > 0 && storm.lastHailDate) {
+    // Naming the date is good; naming the date and the fact that time is
+    // running out is the difference between a reply and a filed email. Only
+    // said when the record supports it — an invented deadline is worse than
+    // no opener at all.
+    const window = claimWindow(monthsSinceHail);
+    const day = formatDay(storm.lastHailDate);
+    if (window === 'closing') return `hail on ${day}, and that claim is nearly two years old`;
+    if (window === 'prime' || window === 'open') return `hail on ${day}, still inside the claim window`;
+    return `hail on ${day}`;
+  }
   if (roof.basis === 'permit' && roof.asOfDate && (roof.years ?? 0) > 12) {
     return `the roof permit from ${roof.asOfDate.slice(0, 4)}`;
   }
@@ -200,4 +214,40 @@ export function releaseUnderQuota(
     blocked,
     remaining: remaining === null ? null : Math.max(0, remaining - released.length),
   };
+}
+
+/**
+ * How much time is left to sell against a storm.
+ *
+ * Not legal advice and deliberately not phrased as a deadline: policies differ and
+ * a contractor is not the one who decides. It reports how a carrier tends to
+ * treat a claim of this age, which is what changes whether the visit is worth
+ * making this week or at all.
+ */
+export type ClaimWindow = 'fresh' | 'prime' | 'open' | 'closing' | 'stale' | 'none';
+
+export function claimWindow(monthsSinceHail?: number | null): ClaimWindow {
+  if (monthsSinceHail == null) return 'none';
+  if (monthsSinceHail <= 3) return 'fresh';
+  if (monthsSinceHail <= 9) return 'prime';
+  if (monthsSinceHail <= 18) return 'open';
+  if (monthsSinceHail <= 24) return 'closing';
+  return 'stale';
+}
+
+export function claimWindowLabel(w: ClaimWindow): string {
+  switch (w) {
+    case 'fresh':
+      return 'Damage is days or weeks old — and so is every competitor’s door knock.';
+    case 'prime':
+      return 'Best window. Adjusters have caught up and the claim is unambiguously timely.';
+    case 'open':
+      return 'Still claimable, but the homeowner should not keep waiting.';
+    case 'closing':
+      return 'Approaching the notice period in most policies.';
+    case 'stale':
+      return 'A carrier can no longer tie the damage to one dated storm.';
+    case 'none':
+      return 'No hail on record near this parcel in ten years.';
+  }
 }
