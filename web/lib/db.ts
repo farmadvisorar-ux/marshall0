@@ -402,7 +402,9 @@ export type NearbyParcel = {
   hail_3y: number;
   hail_max_in: string | null;
   hail_last: string | null;
+  months_since_hail: number | null;
   wind_3y: number;
+  thermal_cycles: string | null;
 };
 
 /**
@@ -440,19 +442,34 @@ export async function parcelsNearPoint(
       LIMIT 2000
     )
     SELECT n.*, COALESCE(s.hail_3y, 0)::int AS hail_3y, s.hail_max_in, s.hail_last,
-           COALESCE(s.wind_3y, 0)::int AS wind_3y
+           COALESCE(s.wind_3y, 0)::int AS wind_3y,
+           CASE WHEN s.hail_last IS NULL THEN NULL
+                ELSE ROUND(EXTRACT(EPOCH FROM AGE(CURRENT_DATE, s.hail_last)) / 2629746.0)::int
+           END AS months_since_hail,
+           cc.thermal_cycles
     FROM near n
     LEFT JOIN LATERAL (
-      SELECT COUNT(*) FILTER (WHERE e.event_type = 'Hail')::int AS hail_3y,
-             MAX(e.magnitude) FILTER (WHERE e.event_type = 'Hail') AS hail_max_in,
+      -- One pass over a ten-year window. The counts still describe three
+      -- years, but the most recent hail has to be findable further back than
+      -- that: "no hail in three years" and "hail four years ago" are the same
+      -- count and a completely different conversation on a doorstep.
+      SELECT COUNT(*) FILTER (
+               WHERE e.event_type = 'Hail' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+             )::int AS hail_3y,
+             MAX(e.magnitude) FILTER (
+               WHERE e.event_type = 'Hail' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+             ) AS hail_max_in,
              MAX(e.begin_date) FILTER (WHERE e.event_type = 'Hail') AS hail_last,
-             COUNT(*) FILTER (WHERE e.event_type LIKE '%Wind%')::int AS wind_3y
+             COUNT(*) FILTER (
+               WHERE e.event_type LIKE '%Wind%' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+             )::int AS wind_3y
       FROM storm_events e
-      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '10 years'
         AND e.lat BETWEEN n.lat - ${EXPOSURE_DEG} AND n.lat + ${EXPOSURE_DEG}
         AND e.lon BETWEEN n.lon - (${EXPOSURE_DEG} / GREATEST(COS(RADIANS(n.lat)), 0.01))
                       AND n.lon + (${EXPOSURE_DEG} / GREATEST(COS(RADIANS(n.lat)), 0.01))
     ) s ON TRUE
+    LEFT JOIN county_climate cc ON cc.fips = n.county_fips
     WHERE n.distance_km <= ${radiusKm}
     ORDER BY COALESCE(s.hail_3y, 0) DESC, n.distance_km ASC
     LIMIT ${limit}
@@ -511,7 +528,9 @@ export type ScoredCandidate = ParcelRow & {
   hail_3y: number;
   hail_max_in: number | null;
   hail_last: string | null;
+  months_since_hail: number | null;
   wind_3y: number;
+  thermal_cycles: string | null;
 };
 
 /**
@@ -561,20 +580,34 @@ export async function scoredCandidates(
       COALESCE(s.hail_3y, 0)::int  AS hail_3y,
       s.hail_max_in,
       s.hail_last,
-      COALESCE(s.wind_3y, 0)::int  AS wind_3y
+      COALESCE(s.wind_3y, 0)::int  AS wind_3y,
+      CASE WHEN s.hail_last IS NULL THEN NULL
+           ELSE ROUND(EXTRACT(EPOCH FROM AGE(CURRENT_DATE, s.hail_last)) / 2629746.0)::int
+      END AS months_since_hail,
+      cc.thermal_cycles
     FROM candidates c
     LEFT JOIN LATERAL (
+      -- Ten years scanned, three years counted. The count and the date answer
+      -- different questions: how often it hails here, and whether this roof
+      -- still has a claim a carrier will look at.
       SELECT
-        COUNT(*) FILTER (WHERE e.event_type = 'Hail')::int AS hail_3y,
-        MAX(e.magnitude) FILTER (WHERE e.event_type = 'Hail') AS hail_max_in,
+        COUNT(*) FILTER (
+          WHERE e.event_type = 'Hail' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+        )::int AS hail_3y,
+        MAX(e.magnitude) FILTER (
+          WHERE e.event_type = 'Hail' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+        ) AS hail_max_in,
         MAX(e.begin_date) FILTER (WHERE e.event_type = 'Hail') AS hail_last,
-        COUNT(*) FILTER (WHERE e.event_type LIKE '%Wind%')::int AS wind_3y
+        COUNT(*) FILTER (
+          WHERE e.event_type LIKE '%Wind%' AND e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+        )::int AS wind_3y
       FROM storm_events e
-      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '3 years'
+      WHERE e.begin_date >= CURRENT_DATE - INTERVAL '10 years'
         AND e.lat BETWEEN c.lat - ${DEG_LAT} AND c.lat + ${DEG_LAT}
         AND e.lon BETWEEN c.lon - (${DEG_LAT} / GREATEST(COS(RADIANS(c.lat)), 0.01))
                       AND c.lon + (${DEG_LAT} / GREATEST(COS(RADIANS(c.lat)), 0.01))
     ) s ON TRUE
+    LEFT JOIN county_climate cc ON cc.fips = ${fips}
     ORDER BY COALESCE(s.hail_3y, 0) DESC, c.year_built ASC
   `) as ScoredCandidate[];
 }

@@ -102,6 +102,12 @@ export async function POST(request: Request) {
       // signal that nobody who can say yes lives there.
       ownerOccupied: p.absentee_owner === null ? undefined : !p.absentee_owner,
       insuranceClaimLikelihood: claim,
+      // Recency, not just frequency. A count of storms cannot tell a claim
+      // that is still open from one a carrier will no longer look at.
+      monthsSinceHail: p.months_since_hail ?? undefined,
+      // How hard this climate is on asphalt, so the same roof age does not
+      // read identically in Denver and on the California coast.
+      climateRoofStress: p.thermal_cycles == null ? undefined : Number(p.thermal_cycles),
     }, { tier: ent.scoring });
 
     return {

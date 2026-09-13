@@ -40,6 +40,8 @@ export type PropertyLead = {
   hailEventsLast3y: number;
   hailMaxInches: number | null;
   lastHailDate: string | null;
+  monthsSinceHail: number | null;
+  climateRoofStress: number | null;
 };
 
 export type StormImpactResponse = {

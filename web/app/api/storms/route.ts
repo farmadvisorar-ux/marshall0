@@ -59,6 +59,12 @@ export async function GET(request: Request) {
         propertyValue: p.parcel_value ? Number(p.parcel_value) : undefined,
         ownerOccupied: p.absentee_owner === null ? undefined : !p.absentee_owner,
         insuranceClaimLikelihood: claim,
+        // Recency, not just frequency. A count of storms cannot tell a claim
+        // that is still open from one a carrier will no longer look at.
+        monthsSinceHail: p.months_since_hail ?? undefined,
+        // How hard this climate is on asphalt, so the same roof age does not
+        // read identically in Denver and on the California coast.
+        climateRoofStress: p.thermal_cycles == null ? undefined : Number(p.thermal_cycles),
       });
 
       return {
@@ -83,6 +89,8 @@ export async function GET(request: Request) {
         hailEventsLast3y: p.hail_3y,
         hailMaxInches: hailMax,
         lastHailDate: p.hail_last,
+        monthsSinceHail: p.months_since_hail,
+        climateRoofStress: p.thermal_cycles == null ? null : Number(p.thermal_cycles),
       };
     });
 

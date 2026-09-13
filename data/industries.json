@@ -13,7 +13,7 @@
         {
           "id": "roofAgeYears",
           "label": "Roof age",
-          "weight": 0.26,
+          "weight": 0.22,
           "type": "band",
           "unit": "years",
           "bands": [
@@ -50,7 +50,7 @@
         {
           "id": "hailEventsLast3y",
           "label": "Hail events, 3 years",
-          "weight": 0.22,
+          "weight": 0.16,
           "type": "numeric",
           "range": [
             0,
@@ -63,9 +63,51 @@
           "derivation": "NOAA storm reports of 1in+ hail within 3km of the parcel centroid."
         },
         {
+          "id": "monthsSinceHail",
+          "label": "Months since hail",
+          "weight": 0.12,
+          "type": "band",
+          "unit": "months",
+          "bands": [
+            {
+              "max": 3,
+              "score": 0.85,
+              "note": "Fresh damage, but every competitor in the county is on the same street this week."
+            },
+            {
+              "max": 9,
+              "score": 1.0,
+              "note": "The window. Adjusters have caught up and the claim is unambiguously timely."
+            },
+            {
+              "max": 18,
+              "score": 0.7
+            },
+            {
+              "max": 24,
+              "score": 0.4,
+              "note": "Approaching the notice deadline in most policies."
+            },
+            {
+              "max": 36,
+              "score": 0.15,
+              "note": "A carrier can no longer attribute the damage to one storm."
+            },
+            {
+              "max": null,
+              "score": 0.05
+            }
+          ],
+          "sources": [
+            "noaa-storm-events"
+          ],
+          "derived": true,
+          "derivation": "Months from the most recent 1in+ hail report near the parcel to today. hailEventsLast3y counts storms and cannot tell last month from three years ago; a roof insurers will still pay for is a different lead from one they will not."
+        },
+        {
           "id": "windEventsLast3y",
           "label": "High-wind events, 3 years",
-          "weight": 0.08,
+          "weight": 0.04,
           "type": "numeric",
           "range": [
             0,
@@ -77,9 +119,26 @@
           ]
         },
         {
+          "id": "climateRoofStress",
+          "label": "Climate stress on the roof",
+          "weight": 0.1,
+          "type": "numeric",
+          "unit": "stress days/year",
+          "range": [
+            0,
+            240
+          ],
+          "direction": "higher",
+          "sources": [
+            "ncei-climate-normals"
+          ],
+          "derived": true,
+          "derivation": "Annual mean days at or below 32F plus days at or above 90F, from the NOAA 1991-2020 normals at the nearest first-order station. Asphalt fails by thermal cycling, so this is how fast a roof ages here: 273 days a year in the Colorado high country against 0 on the central California coast."
+        },
+        {
           "id": "roofMaterial",
           "label": "Roof material",
-          "weight": 0.1,
+          "weight": 0.08,
           "type": "categorical",
           "categories": {
             "asphalt-3tab": 1.0,
@@ -97,7 +156,7 @@
         {
           "id": "propertyValue",
           "label": "Property value",
-          "weight": 0.1,
+          "weight": 0.06,
           "type": "band",
           "unit": "USD",
           "bands": [
@@ -138,7 +197,7 @@
         {
           "id": "insuranceClaimLikelihood",
           "label": "Claim likelihood",
-          "weight": 0.12,
+          "weight": 0.1,
           "type": "numeric",
           "range": [
             0,
