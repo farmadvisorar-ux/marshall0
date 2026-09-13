@@ -251,3 +251,4 @@ export function claimWindowLabel(w: ClaimWindow): string {
       return 'No hail on record near this parcel in ten years.';
   }
 }
+

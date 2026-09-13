@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getAccountByClerkId, stormsNearPoint, parcelsNearPoint } from '@/lib/db';
-import { scoreLead } from '@engine';
+import { scoreLead, claimLikelihood } from '@engine';
 import type { StormImpactResponse, PropertyLead } from '@/lib/api-types';
 
 export const maxDuration = 30;
@@ -47,10 +47,15 @@ export async function GET(request: Request) {
     const properties: PropertyLead[] = nearby.map((p) => {
       const roofAgeYears = p.year_built ? thisYear - p.year_built : undefined;
       const hailMax = p.hail_max_in ? Number(p.hail_max_in) : null;
-      const claim =
-        hailMax !== null && roofAgeYears !== undefined
-          ? Math.max(0, Math.min(1, (hailMax / 2) * (roofAgeYears / 25)))
-          : undefined;
+      // The engine's own estimate, which both routes previously reimplemented
+      // inline and worse: the copy required a roof age and returned nothing
+      // without one, so the signal vanished on every roll that publishes no
+      // year built. This one carries material vulnerability and repeat-storm
+      // compounding, and falls back to a stated prior when age is unknown.
+      const claim = claimLikelihood(
+        { hailMaxInches: hailMax ?? undefined, hailEventsLast3y: p.hail_3y },
+        roofAgeYears
+      );
 
       const score = scoreLead('roofing', {
         roofAgeYears,
